@@ -1,0 +1,8 @@
+{
+  "name": "Math Logic Master",
+  "description": "Interactive vertical multiplication and visual logic practice for students.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
