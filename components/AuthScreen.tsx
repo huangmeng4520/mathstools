@@ -11,6 +11,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [gradeLevel, setGradeLevel] = useState<number>(3); // 默认三年级
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,7 +25,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     try {
       const user = isLogin 
         ? await auth.login(username, password)
-        : await auth.register(username, password);
+        : await auth.register(username, password, gradeLevel);
       
       onLoginSuccess(user);
     } catch (err: any) {
@@ -78,6 +79,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               required
             />
           </div>
+          {!isLogin && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">年级</label>
+              <select
+                value={gradeLevel}
+                onChange={(e) => setGradeLevel(parseInt(e.target.value, 10))}
+                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                required
+              >
+                {[1, 2, 3, 4, 5, 6].map((grade) => (
+                  <option key={grade} value={grade}>
+                    {grade}年级
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <button
             type="submit"

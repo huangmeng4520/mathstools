@@ -14,8 +14,10 @@ import {
   Maximize2,
   Crop,
   Check,
+  CheckCircle2,
   AlertTriangle,
-  Play
+  Play,
+  XCircle
 } from 'lucide-react';
 import { MistakeRecord, VisualComponentData, Question } from '../types';
 import { ClockVisualizer } from './ClockVisualizer';
@@ -210,8 +212,20 @@ const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, 
                   </button>
                 </div>
               ) : (
-                <div className="animate-in fade-in slide-in-from-top-4 duration-300">
-                  <div className="bg-green-50 p-5 rounded-xl border border-green-100 mb-6 shadow-sm">
+                <div className="animate-in fade-in slide-in-from-top-4 duration-300 space-y-6">
+                  {/* Collapse Button */}
+                  <div className="flex justify-end">
+                    <button 
+                      onClick={() => setShowAnswer(false)}
+                      className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors"
+                    >
+                      <ChevronUp className="w-4 h-4" />
+                      收起答案
+                    </button>
+                  </div>
+                  
+                  {/* Answer and Explanation */}
+                  <div className="bg-green-50 p-5 rounded-xl border border-green-100 shadow-sm">
                     <div className="font-bold text-green-900 text-lg mb-3 flex items-start gap-2 border-b border-green-200/50 pb-2">
                       <span className="bg-green-200 text-green-800 text-xs px-2 py-0.5 rounded uppercase tracking-wider mt-1">Answer</span>
                       <div className="flex-1 text-gray-900">{renderMarkdown(mistake.answer)}</div>
@@ -267,8 +281,13 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   // New entry state
   const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null);
   const [newImage, setNewImage] = useState<string | null>(null);
-  const [analyzedData, setAnalyzedData] = useState<{html: string, explanation: string, tags: string[], visualComponent?: VisualComponentData} | null>(null);
+  const [analyzedData, setAnalyzedData] = useState<Array<{html: string, answer: string, explanation: string, tags: string[], visualComponent?: VisualComponentData}>>([]);
   const [retryPrompt, setRetryPrompt] = useState('');
+  
+  // Variation preview state
+  const [showVariationPreview, setShowVariationPreview] = useState(false);
+  const [currentVariation, setCurrentVariation] = useState<{html: string, answer: string, explanation: string, tags: string[], visualComponent?: VisualComponentData} | null>(null);
+  const [currentOriginalMistake, setCurrentOriginalMistake] = useState<MistakeRecord | null>(null);
 
   // Cropping State
   const [cropRect, setCropRect] = useState<{x: number, y: number, w: number, h: number} | null>(null);
@@ -283,34 +302,62 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   const handleStartReview = async () => {
     // 1. Filter due mistakes
     const dueMistakes = mistakes.filter(m => Date.now() > m.nextReviewAt).slice(0, 5); 
-    if (dueMistakes.length === 0) return;
+    if (dueMistakes.length === 0) {
+      alert("当前没有需要复习的错题！");
+      return;
+    }
 
     setIsProcessing(true);
     try {
       const generatedQuestions: Question[] = [];
 
       for (const mistake of dueMistakes) {
-        // Call AI to generate distractors
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: `
-              请基于以下数学错题，生成一道单选题用于复习。
-              题目HTML: ${mistake.htmlContent}
-              正确答案: ${mistake.answer}
-              
-              要求：
-              1. 生成 3 个有迷惑性的错误选项。
-              2. 错误选项应该基于常见的计算错误或概念混淆。
-              3. 返回纯 JSON 数组字符串: ["错误选项1", "错误选项2", "错误选项3"]
-            `,
-            config: { responseMimeType: 'application/json' }
-        });
-
-        const distractors: string[] = JSON.parse(response.text || '[]');
+        // 移除答案中的HTML标签，只保留纯文本
+        const cleanAnswer = mistake.answer.replace(/<[^>]*>/g, '').trim();
+        
+        // 生成更合理的错误选项，基于正确答案创建变体
+        const generateDistractors = (correct: string) => {
+          const distractors: string[] = [];
+          
+          // 如果答案是数字，生成相近的数字作为干扰项
+          const num = parseInt(correct);
+          if (!isNaN(num)) {
+            // 生成三个不同的干扰项
+            const variations = [num - 1, num + 1, num - 10, num + 10, num - 100, num + 100];
+            const filtered = variations.filter(v => v !== num && !distractors.includes(v.toString()));
+            for (let i = 0; i < 3 && i < filtered.length; i++) {
+              distractors.push(filtered[i].toString());
+            }
+          }
+          
+          // 如果干扰项不足，使用通用干扰项
+          while (distractors.length < 3) {
+            const genericDistractors = [
+              '这是一个干扰选项',
+              '这个选项不正确',
+              '请再仔细思考',
+              '错误的答案',
+              '不符合题意的选项'
+            ];
+            const randomDistractor = genericDistractors[Math.floor(Math.random() * genericDistractors.length)];
+            if (!distractors.includes(randomDistractor)) {
+              distractors.push(randomDistractor);
+            }
+          }
+          
+          return distractors;
+        };
+        
+        const distractors = generateDistractors(cleanAnswer);
+        
+        // Create options with clean text
         const options = [
-            { id: 'correct', text: mistake.answer },
-            ...distractors.map((d, i) => ({ id: `wrong_${i}`, text: d }))
+            { id: 'correct', text: cleanAnswer },
+            { id: 'wrong_1', text: distractors[0] },
+            { id: 'wrong_2', text: distractors[1] },
+            { id: 'wrong_3', text: distractors[2] }
         ];
+        
         // Shuffle options
         const shuffled = options.sort(() => Math.random() - 0.5);
 
@@ -342,7 +389,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
       onStartReview(generatedQuestions);
     } catch (e) {
       console.error(e);
-      alert("生成复习题失败，请检查网络");
+      alert("生成复习题失败");
     } finally {
       setIsProcessing(false);
     }
@@ -356,7 +403,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
     reader.onloadend = () => {
       setOriginalImageSrc(reader.result as string);
       setNewImage(null);
-      setAnalyzedData(null);
+      setAnalyzedData([]);
       setCropRect(null);
       setRetryPrompt('');
     };
@@ -366,7 +413,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
   const handleReset = () => {
     setNewImage(null);
-    setAnalyzedData(null);
+    setAnalyzedData([]);
     setOriginalImageSrc(null);
     setFile(null);
   };
@@ -375,7 +422,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
   const handleReCrop = () => {
     setNewImage(null);
-    setAnalyzedData(null);
+    setAnalyzedData([]);
     setRetryPrompt('');
   };
 
@@ -453,20 +500,22 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
              { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
              { text: `
              请你扮演一位小学数学老师。分析这张图片中的数学题。
-             ${customInstruction ? `\n用户特别补充说明（请根据此修正识别结果）：${customInstruction}\n` : ''}
-             
+             ${customInstruction ? `
+用户特别补充说明（请根据此修正识别结果）：${customInstruction}
+` : ''}
+              
              注意：本系统支持本地渲染高保真数学组件。如果图片中包含以下数学模型，请不要尝试用HTML画图，而是返回对应的组件数据：
              1. **钟表/时间**: visual type 'clock'
              2. **数轴**: visual type 'numberLine'
              3. **分数**: visual type 'fraction'
              4. **几何图形**: visual type 'geometry'
-             
-             请返回一个纯 JSON 对象，包含以下字段：
+              
+             请返回一个纯 JSON 数组，包含以下字段：
              1. "html": HTML代码片段展示题目文字。字体大小：text-3xl，普通文字 text-lg。字体颜色：text-gray-900。
-             2. "visual": (可选) 组件数据。格式：{ type: "clock", props: { hour: 7, minute: 30 } }。注意 props 字段必须存在。
-             3. "answer": 正确答案。
-             4. "explanation": 中文 Markdown 解析。
-             5. "tags": 2-3个中文标签。
+             2. "answer": 正确答案。
+             3. "explanation": 中文 Markdown 解析。
+             4. "tags": 2-3个中文标签。
+             5. "visualComponent": (可选) 组件数据。格式：{ type: "clock", props: { hour: 7, minute: 30 } }。注意 props 字段必须存在。
              ` }
           ]
         },
@@ -476,16 +525,14 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
       const text = response.text;
       if (text) {
         const data = JSON.parse(text);
-        setAnalyzedData({
-          html: data.html,
-          explanation: data.explanation,
-          tags: data.tags || ['数学'],
-          visualComponent: data.visual
-        });
+        // Ensure data is an array
+        const questions = Array.isArray(data) ? data : [data];
+        setAnalyzedData(questions);
       }
     } catch (error) {
       console.error("AI Error:", error);
       alert("图片解析失败，请重试");
+      setAnalyzedData([]);
     } finally {
       setIsProcessing(false);
     }
@@ -509,55 +556,132 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
         config: { responseMimeType: 'application/json' }
       });
       
-      const data = JSON.parse(response.text || '{}');
+      const textResponse = response.text || '{}';
+      console.log('AI Response:', textResponse);
       
-      // We pass the new record to addMistake
-      // The API service will handle IDs and Timestamps
-      const newRecord = {
-        htmlContent: data.html,
-        visualComponent: data.visual,
+      const parsedData = JSON.parse(textResponse);
+      // Handle both array and single object responses
+      const data = Array.isArray(parsedData) ? parsedData[0] : parsedData;
+      
+      // Validate required fields
+      if (!data.html || !data.answer || !data.explanation) {
+        throw new Error('AI response missing required fields');
+      }
+      
+      // Set the generated variation for preview
+      setCurrentVariation({
+        html: data.html,
         answer: data.answer,
         explanation: data.explanation,
         tags: [...(data.tags || []), '变式'],
-        nextReviewAt: Date.now(),
-        reviewCount: 0,
-        masteryLevel: 'new' as const
-      };
+        visualComponent: data.visual
+      });
       
-      addMistake(newRecord);
-      alert("🎉 变式题目已生成！");
+      // Store the original mistake reference
+      setCurrentOriginalMistake(original);
+      
+      // Show the preview modal
+      setShowVariationPreview(true);
+      console.log('Preview modal shown successfully');
     } catch (e) {
-      console.error(e);
-      alert("生成失败，请稍后重试");
+      console.error('Error generating variation:', e);
+      alert(`生成失败，请稍后重试：${e instanceof Error ? e.message : '未知错误'}`);
     } finally {
       setIsProcessing(false);
     }
   };
+  
+  const regenerateVariation = async () => {
+    if (!currentOriginalMistake) return;
+    await generateVariation(currentOriginalMistake);
+  };
+  
+  const saveVariation = async () => {
+    if (!currentVariation || !currentOriginalMistake) return;
+    
+    setIsProcessing(true);
+    try {
+      // Create the request data in the format expected by the backend
+      const requestData = {
+        originalImage: {
+          url: currentOriginalMistake.imageData || '',
+          fileId: `local-${Date.now()}` // Generate a temporary fileId
+        },
+        mistakes: [{
+          html: currentVariation.html,
+          answer: currentVariation.answer,
+          explanation: currentVariation.explanation,
+          tags: currentVariation.tags,
+          originalMistakeId: currentOriginalMistake.id // Add the association
+        }]
+      };
+      
+      await addMistake(requestData);
+      
+      // Close the preview modal immediately
+      setShowVariationPreview(false);
+      setCurrentVariation(null);
+      setCurrentOriginalMistake(null);
+      
+      // Switch to list view immediately
+      setView('list');
+      
+      // Show success message after view update
+      setTimeout(() => {
+        alert("🎉 变式题目已保存！");
+      }, 100);
+    } catch (e) {
+      console.error("保存变式失败:", e);
+      alert("保存失败，请稍后重试");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+  
+  const closeVariationPreview = () => {
+    setShowVariationPreview(false);
+    setCurrentVariation(null);
+    setCurrentOriginalMistake(null);
+  };
 
-  const saveNewMistake = () => {
-    if (!analyzedData) return;
+  const saveNewMistake = async () => {
+    if (analyzedData.length === 0) return;
     
-    // Construct the payload for the API
-    const record = {
-      imageData: newImage || undefined,
-      htmlContent: analyzedData.html,
-      visualComponent: analyzedData.visualComponent,
-      answer: '', // answer is often in explanation for these types, but AI returns it separate
-      explanation: analyzedData.explanation,
-      tags: analyzedData.tags,
-      nextReviewAt: Date.now(),
-      reviewCount: 0,
-      masteryLevel: 'new' as const
-    };
-    
-    addMistake(record);
-    
-    // Reset View
-    setOriginalImageSrc(null);
-    setNewImage(null);
-    setAnalyzedData(null);
-    setRetryPrompt('');
-    setView('list');
+    setIsProcessing(true);
+    try {
+      // 发送所有错题数据到后端
+      const requestData = {
+        originalImage: {
+          url: newImage || '',
+          fileId: `local-${Date.now()}` // 生成一个临时fileId
+        },
+        mistakes: analyzedData.map(data => ({
+          html: data.html,
+          answer: data.answer,
+          explanation: data.explanation,
+          tags: data.tags || []
+        }))
+      };
+      
+      await addMistake(requestData);
+      
+      // Reset View and switch to list immediately
+      setOriginalImageSrc(null);
+      setNewImage(null);
+      setAnalyzedData([]);
+      setRetryPrompt('');
+      setView('list');
+      
+      // Show success message after view update
+      setTimeout(() => {
+        alert("🎉 错题添加成功！");
+      }, 100);
+    } catch (error) {
+      console.error("保存错题失败:", error);
+      alert("保存错题失败，请重试");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // --- Render ---
@@ -603,6 +727,87 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
           <div className="bg-white px-8 py-6 rounded-2xl shadow-2xl flex flex-col items-center gap-4 border border-purple-100">
             <RefreshCw className="w-10 h-10 text-purple-600 animate-spin" />
             <span className="font-bold text-xl text-gray-800">AI 老师正在思考中...</span>
+          </div>
+        </div>
+      )}
+      
+      {/* Variation Preview Modal */}
+      {showVariationPreview && currentVariation && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="bg-purple-600 text-white px-8 py-4 flex justify-between items-center">
+              <h3 className="text-2xl font-bold flex items-center gap-2">
+                <Wand2 className="w-6 h-6" />
+                变式练习预览
+              </h3>
+              <button 
+                onClick={closeVariationPreview}
+                className="text-white hover:text-gray-200 transition-colors"
+              >
+                <XCircle className="w-6 h-6" />
+              </button>
+            </div>
+            
+            {/* Content */}
+            <div className="p-8">
+              {/* Original Mistake Reference */}
+              <div className="bg-blue-50 p-4 rounded-xl mb-6 border border-blue-100">
+                <p className="font-bold text-blue-800 flex items-center gap-2 text-sm mb-2">
+                  <BookOpen className="w-4 h-4" />
+                  基于原题：{currentOriginalMistake?.tags.join(' / ') || '未知'}
+                </p>
+                <div className="text-xs text-blue-600">
+                  点击关闭可重新生成，满意后点击保存
+                </div>
+              </div>
+              
+              {/* Generated Variation */}
+              <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mb-8">
+                <div className="w-full break-words prose prose-lg max-w-none text-gray-900 mb-4" dangerouslySetInnerHTML={{__html: currentVariation.html}} />
+                {currentVariation.visualComponent && (
+                  <div className="w-full border-t border-dashed border-gray-200 pt-4">
+                    {renderVisualComponent(currentVariation.visualComponent)}
+                  </div>
+                )}
+                <div className="mt-4">
+                  <div className="flex gap-2 flex-wrap">
+                    {currentVariation.tags.map(t => (
+                      <span key={t} className="px-3 py-1 bg-gray-100 text-gray-700 rounded-lg text-sm font-bold border border-gray-200">{t}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Answer and Explanation */}
+              <div className="bg-green-50 p-5 rounded-xl border border-green-100 mb-8 shadow-sm">
+                <div className="font-bold text-green-900 text-lg mb-3 flex items-start gap-2 border-b border-green-200/50 pb-2">
+                  <span className="bg-green-200 text-green-800 text-xs px-2 py-0.5 rounded uppercase tracking-wider mt-1">Answer</span>
+                  <div className="flex-1 text-gray-900">{renderMarkdown(currentVariation.answer)}</div>
+                </div>
+                <div className="text-sm bg-white p-4 rounded-lg border border-green-100/50 text-gray-700 leading-relaxed shadow-sm">
+                  {renderMarkdown(currentVariation.explanation)}
+                </div>
+              </div>
+              
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row gap-4">
+                <button 
+                  onClick={regenerateVariation}
+                  className="flex-1 py-3 bg-amber-50 text-amber-600 border border-amber-200 rounded-xl text-base font-bold hover:bg-amber-100 transition-colors flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className="w-5 h-5" />
+                  重新生成
+                </button>
+                <button 
+                  onClick={saveVariation}
+                  className="flex-1 py-3 bg-purple-600 text-white rounded-xl text-base font-bold hover:bg-purple-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 className="w-5 h-5" />
+                  保存到错题本
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -747,28 +952,42 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                      </div>
                      
                      <div className="flex-1">
-                       {analyzedData ? (
+                       {analyzedData.length > 0 ? (
                          <div className="flex flex-col h-full gap-4">
                            <div className="flex-1 bg-white border-2 border-green-100 rounded-xl p-0 shadow-sm relative overflow-auto max-h-[400px]">
                              <div className="absolute top-0 left-0 bg-green-100 text-green-700 text-xs font-bold px-3 py-1 rounded-br-lg z-10">识别结果预览</div>
-                             <div className="min-h-full min-w-full flex flex-col items-center justify-center p-6 text-gray-900">
-                                <div className="w-full break-words prose prose-lg max-w-none text-gray-900 mb-4" dangerouslySetInnerHTML={{__html: analyzedData.html}} />
-                                {analyzedData.visualComponent && (
-                                   <div className="w-full border-t border-dashed border-gray-200 pt-4">
-                                     <span className="text-xs text-gray-400 block mb-2 text-center">- 生成的数学组件 -</span>
-                                     {renderVisualComponent(analyzedData.visualComponent)}
+                             <div className="p-6">
+                               <h4 className="text-lg font-bold text-gray-800 mb-4">共识别到 {analyzedData.length} 道题目</h4>
+                               <div className="space-y-6">
+                                 {analyzedData.map((data, index) => (
+                                   <div key={index} className="border-b border-gray-200 pb-4 last:border-b-0 last:pb-0">
+                                     <div className="mb-2 flex items-center gap-2">
+                                       <span className="bg-blue-100 text-blue-600 text-xs font-bold px-2 py-1 rounded">题目 {index + 1}</span>
+                                     </div>
+                                     <div className="w-full break-words prose prose-lg max-w-none text-gray-900 mb-4" dangerouslySetInnerHTML={{__html: data.html}} />
+                                     {data.visualComponent && (
+                                       <div className="w-full border-t border-dashed border-gray-200 pt-4">
+                                         <span className="text-xs text-gray-400 block mb-2 text-center">- 生成的数学组件 -</span>
+                                         {renderVisualComponent(data.visualComponent)}
+                                       </div>
+                                     )}
+                                     <div className="mt-2">
+                                       <div className="flex gap-2 flex-wrap">
+                                         {data.tags.map(t => (
+                                           <span key={t} className="px-3 py-1 bg-gray-100 text-gray-700 rounded-lg text-sm font-bold border border-gray-200">{t}</span>
+                                         ))}
+                                       </div>
+                                     </div>
                                    </div>
-                                )}
+                                 ))}
+                               </div>
                              </div>
-                           </div>
-                           <div className="flex gap-2 flex-wrap">
-                             {analyzedData.tags.map(t => (<span key={t} className="px-3 py-1 bg-gray-100 text-gray-700 rounded-lg text-sm font-bold border border-gray-200">{t}</span>))}
                            </div>
                          </div>
                        ) : null}
                      </div>
                   </div>
-                  <button onClick={saveNewMistake} disabled={!analyzedData} className="w-full py-4 bg-purple-600 text-white font-bold text-lg rounded-xl hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all shadow-md">确认添加到错题本</button>
+                  <button onClick={saveNewMistake} disabled={analyzedData.length === 0} className="w-full py-4 bg-purple-600 text-white font-bold text-lg rounded-xl hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all shadow-md">确认添加到错题本</button>
                 </div>
               )}
             </div>

@@ -55,6 +55,7 @@ export interface AuthResponse {
 export interface MistakeRecord {
   id: string;
   userId?: string; // For future multi-user support
+  originalMistakeId?: string; // Reference to the original mistake for variations
   
   // Image Info
   imageData?: string; // Base64 string (Frontend Mock) or URL (Backend)

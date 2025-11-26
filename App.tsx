@@ -36,7 +36,8 @@ export default function App() {
 
   const handleLogin = (u: User) => {
     setUser(u);
-    window.location.reload(); // Refresh to ensure useMistakeManager picks up new token/state if needed
+    // 移除window.location.reload()调用，避免页面刷新
+    // useMistakeManager会在user状态变化时自动重新获取数据
   };
 
   const handleLogout = () => {
@@ -215,7 +216,7 @@ export default function App() {
         </div>
       </div>
 
-      <main className="flex-1 max-w-3xl w-full mx-auto p-4 md:p-6 pb-32">
+      <main className="flex-1 max-w-3xl w-full mx-auto p-4 md:p-6 pb-64 overflow-visible">
         <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-6 text-center">
           {currentQuestion.title}
         </h2>
@@ -224,7 +225,7 @@ export default function App() {
           {currentQuestion.content}
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-6 overflow-visible mb-8">
           {currentQuestion.options.map((opt) => {
             let stateClass = "border-gray-200 hover:border-blue-400 hover:bg-blue-50";
             
@@ -246,17 +247,22 @@ export default function App() {
                 key={opt.id}
                 onClick={() => handleOptionSelect(opt.id)}
                 disabled={isCorrect !== null}
-                className={`w-full p-4 text-left rounded-xl border-2 transition-all duration-200 flex items-center justify-between group ${stateClass}`}
+                className={`w-full p-6 text-left rounded-xl border-2 transition-all duration-200 flex flex-col items-start justify-start group ${stateClass} overflow-visible`}
+                style={{ minHeight: '80px' }}
               >
-                <span className="font-medium text-gray-800">{opt.text}</span>
+                <span className="font-medium text-gray-800 break-words w-full">{opt.text}</span>
                 {selectedOption === opt.id && isCorrect === null && (
-                   <div className="w-5 h-5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                   <div className="mt-2 w-5 h-5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
                 )}
                 {isCorrect !== null && opt.id === currentQuestion.correctId && (
-                   <CheckCircle2 className="w-6 h-6 text-green-600" />
+                   <div className="mt-2 w-6 h-6 text-green-600">
+                     <CheckCircle2 className="w-full h-full" />
+                   </div>
                 )}
                  {isCorrect !== null && selectedOption === opt.id && opt.id !== currentQuestion.correctId && (
-                   <XCircle className="w-6 h-6 text-red-600" />
+                   <div className="mt-2 w-6 h-6 text-red-600">
+                     <XCircle className="w-full h-full" />
+                   </div>
                 )}
               </button>
             );
