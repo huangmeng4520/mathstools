@@ -41,6 +41,17 @@ export interface VisualComponentData {
 export type MasteryLevel = 'new' | 'learning' | 'reviewing' | 'mastered';
 export type MistakeStatus = 'processing' | 'active' | 'archived' | 'deleted';
 
+export interface User {
+  id: string;
+  username: string;
+  gradeLevel?: number;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: User;
+}
+
 export interface MistakeRecord {
   id: string;
   userId?: string; // For future multi-user support

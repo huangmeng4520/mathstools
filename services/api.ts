@@ -1,36 +1,17 @@
-import { MistakeRecord, MistakeStatus } from '../types';
+import { MistakeRecord, User, AuthResponse } from '../types';
 
 /**
  * API Service Layer
  * 
- * This file acts as the bridge between the frontend components and the data source.
- * Currently, it implements a "Mock Adapter" using LocalStorage to simulate a backend.
- * 
- * To switch to a real backend:
- * 1. Set USE_MOCK_API = false
- * 2. Implement the 'RealApi' methods using fetch/axios calling your Node.js endpoints.
+ * Configured for Real Backend at http://localhost:3000
  */
 
-const USE_MOCK_API = true;
+// --- CONFIGURATION ---
+const USE_MOCK_API = false; // Set to FALSE to use Real Backend
+const BASE_URL = 'http://localhost:3000';
 const STORAGE_KEY = 'math_master_mistakes_v2';
-const MOCK_DELAY = 600; // Simulate network latency in ms
-
-// --- Mock Data ---
-const MOCK_INITIAL_DATA: MistakeRecord[] = [
-  {
-    id: 'mock-1',
-    status: 'active',
-    htmlContent: '<div class="text-3xl font-bold text-gray-900">计算：14 × 3 = ?</div>',
-    answer: '42',
-    explanation: '1. 个位 4×3=12，写2进1。\n2. 十位 1×3=3，加上进位1得4。\n3. 结果 42。',
-    tags: ['乘法', '进位'],
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    nextReviewAt: Date.now() - 10000, // Ready for review
-    reviewCount: 0,
-    masteryLevel: 'new'
-  }
-];
+const TOKEN_KEY = 'math_master_token';
+const MOCK_DELAY = 500;
 
 // --- Interface ---
 interface ApiService {
@@ -41,157 +22,173 @@ interface ApiService {
   reviewMistake: (id: string, success: boolean) => Promise<MistakeRecord>;
 }
 
-// --- Mock Implementation ---
+// --- AUTH SERVICE ---
+export const auth = {
+  login: async (username: string, passwordHash: string): Promise<User> => {
+    if (USE_MOCK_API) {
+      // Mock Login
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          localStorage.setItem(TOKEN_KEY, 'mock-token');
+          resolve({ id: 'mock-user-1', username, gradeLevel: 3 });
+        }, 500);
+      });
+    }
+    
+    // Real Login
+    const res = await fetch(`${BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password: passwordHash }) // Backend expects 'password' usually
+    });
+    
+    if (!res.ok) throw new Error('登录失败，请检查用户名或密码');
+    
+    const data: AuthResponse = await res.json();
+    localStorage.setItem(TOKEN_KEY, data.token);
+    return data.user;
+  },
+
+  register: async (username: string, passwordHash: string): Promise<User> => {
+    if (USE_MOCK_API) {
+      return auth.login(username, passwordHash);
+    }
+
+    const res = await fetch(`${BASE_URL}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password: passwordHash })
+    });
+
+    if (!res.ok) throw new Error('注册失败，用户名可能已存在');
+
+    const data: AuthResponse = await res.json();
+    localStorage.setItem(TOKEN_KEY, data.token);
+    return data.user;
+  },
+
+  getProfile: async (): Promise<User | null> => {
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (!token) return null;
+
+    if (USE_MOCK_API) {
+      return { id: 'mock-user-1', username: 'Guest', gradeLevel: 3 };
+    }
+
+    try {
+      const res = await fetch(`${BASE_URL}/auth/profile`, {
+        method: 'POST', // Backend spec says POST for profile
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!res.ok) {
+        localStorage.removeItem(TOKEN_KEY);
+        return null;
+      }
+      
+      const user: User = await res.json();
+      return user;
+    } catch (e) {
+      return null;
+    }
+  },
+
+  logout: () => {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+};
+
+// --- Mock Implementation (LocalStorage) ---
+// ... (Keeping Mock Logic for fallback if needed, but not used when USE_MOCK_API = false)
 const MockApi: ApiService = {
   getMistakes: async () => {
     return new Promise((resolve) => {
       setTimeout(() => {
         const json = localStorage.getItem(STORAGE_KEY);
-        if (!json) {
-          resolve(MOCK_INITIAL_DATA);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(MOCK_INITIAL_DATA));
-        } else {
-          resolve(JSON.parse(json));
-        }
+        resolve(json ? JSON.parse(json) : []);
       }, MOCK_DELAY);
     });
   },
-
   addMistake: async (data) => {
     return new Promise((resolve) => {
       setTimeout(() => {
         const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-        
-        const newRecord: MistakeRecord = {
-          ...data,
-          id: Date.now().toString(), // Simple ID generation
-          status: 'active',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          reviewCount: 0,
-          masteryLevel: 'new',
-          // Default next review is now (immediate practice) or tomorrow
-          nextReviewAt: Date.now(), 
-        };
-
-        const updated = [newRecord, ...stored];
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-        resolve(newRecord);
+        const newRecord = { ...data, id: Date.now().toString(), status: 'active' as const, createdAt: Date.now(), updatedAt: Date.now(), reviewCount: 0, masteryLevel: 'new' as const, nextReviewAt: Date.now() };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify([newRecord, ...stored]));
+        resolve(newRecord as MistakeRecord);
       }, MOCK_DELAY);
     });
   },
-
   deleteMistake: async (id) => {
     return new Promise((resolve) => {
       setTimeout(() => {
-        const stored: MistakeRecord[] = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-        // Soft delete or hard delete? Let's do hard delete for mock
-        const updated = stored.filter(m => m.id !== id);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(stored.filter((m: any) => m.id !== id)));
         resolve();
       }, MOCK_DELAY);
     });
   },
-
-  updateMistake: async (id, updates) => {
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        const stored: MistakeRecord[] = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-        const index = stored.findIndex(m => m.id === id);
-        
-        if (index === -1) {
-          reject(new Error("Mistake not found"));
-          return;
-        }
-
-        const updatedRecord = { ...stored[index], ...updates, updatedAt: Date.now() };
-        stored[index] = updatedRecord;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
-        resolve(updatedRecord);
-      }, MOCK_DELAY);
-    });
-  },
-
-  reviewMistake: async (id, success) => {
-    // This logic mimics the backend SRS algorithm
-    return new Promise((resolve, reject) => {
-        setTimeout(() => {
-            const stored: MistakeRecord[] = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-            const index = stored.findIndex(m => m.id === id);
-            
-            if (index === -1) {
-              reject(new Error("Mistake not found"));
-              return;
-            }
-            
-            const mistake = stored[index];
-            
-            // SRS Algorithm Logic
-            let nextInterval = 24 * 60 * 60 * 1000; // Default 1 day
-            let newMastery: MistakeRecord['masteryLevel'] = mistake.masteryLevel;
-            
-            if (success) {
-                const count = mistake.reviewCount + 1;
-                if (count === 1) nextInterval = 1 * 24 * 60 * 60 * 1000; // 1 day
-                else if (count === 2) nextInterval = 3 * 24 * 60 * 60 * 1000; // 3 days
-                else nextInterval = (count * 7) * 24 * 60 * 60 * 1000; // Weekly growth
-                
-                newMastery = count > 2 ? 'mastered' : 'learning';
-            } else {
-                nextInterval = 0; // Immediate review
-                newMastery = 'learning';
-            }
-
-            const updatedRecord: MistakeRecord = {
-                ...mistake,
-                reviewCount: success ? mistake.reviewCount + 1 : mistake.reviewCount,
-                nextReviewAt: Date.now() + nextInterval,
-                masteryLevel: newMastery,
-                updatedAt: Date.now()
-            };
-
-            stored[index] = updatedRecord;
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
-            resolve(updatedRecord);
-        }, MOCK_DELAY);
-    });
-  }
+  updateMistake: async (id, updates) => { return Promise.resolve({} as any); },
+  reviewMistake: async (id, success) => { return Promise.resolve({} as any); }
 };
 
-// --- Real API Stub (For Future) ---
+// --- Real API Helper ---
+async function fetchWithAuth<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    ...options.headers,
+  };
+
+  const res = await fetch(`${BASE_URL}${endpoint}`, {
+    ...options,
+    headers
+  });
+
+  const contentType = res.headers.get("content-type");
+  if (contentType && contentType.includes("text/html")) {
+     // This usually happens if the backend is down and the frontend dev server serves index.html
+    throw new Error(`连接后端失败。请确保后端服务运行在 ${BASE_URL}`);
+  }
+
+  if (res.status === 401) {
+    auth.logout();
+    window.location.reload(); // Force re-login
+    throw new Error("Session expired");
+  }
+
+  if (!res.ok) {
+    throw new Error(`API Error: ${res.status} ${res.statusText}`);
+  }
+
+  return res.json();
+}
+
 const RealApi: ApiService = {
-  getMistakes: async () => {
-    const res = await fetch('/api/mistakes');
-    return res.json();
-  },
-  addMistake: async (data) => {
-    const res = await fetch('/api/mistakes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-    });
-    return res.json();
-  },
+  getMistakes: async () => fetchWithAuth('/api/mistakes'),
+  
+  addMistake: async (data) => fetchWithAuth('/api/mistakes', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  }),
+  
   deleteMistake: async (id) => {
-      await fetch(`/api/mistakes/${id}`, { method: 'DELETE' });
+      await fetchWithAuth(`/api/mistakes/${id}`, { method: 'DELETE' });
   },
-  updateMistake: async (id, updates) => {
-    const res = await fetch(`/api/mistakes/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
-    });
-    return res.json();
-  },
-  reviewMistake: async (id, success) => {
-    const res = await fetch(`/api/mistakes/${id}/review`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ success })
-    });
-    return res.json();
-  }
+  
+  updateMistake: async (id, updates) => fetchWithAuth(`/api/mistakes/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates)
+  }),
+  
+  reviewMistake: async (id, success) => fetchWithAuth(`/api/mistakes/${id}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ success })
+  })
 };
 
-// Export the selected implementation
 export const api = USE_MOCK_API ? MockApi : RealApi;
