@@ -77,3 +77,24 @@ export interface MistakeRecord {
   reviewCount: number;
   masteryLevel: MasteryLevel;
 }
+
+export interface MistakeData {
+  html: string;
+  answer: string;
+  explanation: string;
+  tags: string[];
+  visualComponent?: VisualComponentData;
+  originalMistakeId?: string;
+}
+
+export interface BulkMistakeInput {
+  originalImage: {
+    url: string;
+    fileId: string;
+  };
+  mistakes: MistakeData[];
+}
+
+export type MistakeRecordInput = Omit<MistakeRecord, 'id' | 'createdAt' | 'updatedAt' | 'status'>;
+
+export type AddMistakePayload = MistakeRecordInput | BulkMistakeInput;

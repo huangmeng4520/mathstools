@@ -1,4 +1,4 @@
-import { MistakeRecord, User, AuthResponse } from '../types';
+import { MistakeRecord, User, AuthResponse, AddMistakePayload } from '../types';
 
 /**
  * API Service Layer
@@ -9,7 +9,7 @@ import { MistakeRecord, User, AuthResponse } from '../types';
 // --- CONFIGURATION ---
 // CHANGED: Reverted to TRUE to ensure app runs without backend connection errors by default.
 // Set this to FALSE only when your local backend (localhost:3000) is running and CORS is configured.
-const USE_MOCK_API = false; 
+const USE_MOCK_API = true; 
 const BASE_URL = 'http://localhost:3000';
 const STORAGE_KEY = 'math_master_mistakes_v2';
 const TOKEN_KEY = 'math_master_token';
@@ -18,7 +18,7 @@ const MOCK_DELAY = 500;
 // --- Interface ---
 interface ApiService {
   getMistakes: () => Promise<MistakeRecord[]>;
-  addMistake: (mistake: Omit<MistakeRecord, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => Promise<MistakeRecord>;
+  addMistake: (mistake: AddMistakePayload) => Promise<MistakeRecord | MistakeRecord[]>;
   deleteMistake: (id: string) => Promise<void>;
   updateMistake: (id: string, updates: Partial<MistakeRecord>) => Promise<MistakeRecord>;
   reviewMistake: (id: string, success: boolean) => Promise<MistakeRecord>;
@@ -38,20 +38,30 @@ export const auth = {
     }
     
     // Real Login
-    const res = await fetch(`${BASE_URL}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password: passwordHash }) // Backend expects 'password' usually
-    });
-    
-    if (!res.ok) {
-      const errorData = await res.json();
-      throw new Error(errorData.message || '登录失败，请检查用户名或密码');
+    try {
+      const res = await fetch(`${BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password: passwordHash }) // Backend expects 'password' usually
+      });
+      
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("text/html")) {
+        throw new Error(`连接后端失败。后端返回了HTML而不是JSON，可能是路径错误。`);
+      }
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || '登录失败，请检查用户名或密码');
+      }
+      
+      const data: AuthResponse = await res.json();
+      localStorage.setItem(TOKEN_KEY, data.token);
+      return data.user;
+    } catch (e: any) {
+      console.error("Login Error:", e);
+      throw e;
     }
-    
-    const data: AuthResponse = await res.json();
-    localStorage.setItem(TOKEN_KEY, data.token);
-    return data.user;
   },
 
   register: async (username: string, passwordHash: string, gradeLevel: number = 3): Promise<User> => {
@@ -67,7 +77,7 @@ export const auth = {
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
+        const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || '注册失败，用户名可能已存在');
       }
 
@@ -131,19 +141,56 @@ const MockApi: ApiService = {
     return new Promise((resolve) => {
       setTimeout(() => {
         const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-        const newRecord = { 
-          ...data, 
-          id: Date.now().toString(), 
-          status: 'active' as const, 
-          createdAt: Date.now(), 
-          updatedAt: Date.now(), 
-          reviewCount: 0, 
-          masteryLevel: 'new' as const, 
-          nextReviewAt: Date.now(),
-          userId: 'mock-user-1'
-        };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify([newRecord, ...stored]));
-        resolve(newRecord as MistakeRecord);
+        
+        // Handle nested data structure if coming from saveNewMistake
+        let newRecords: MistakeRecord[] = [];
+        let isBulk = false;
+        
+        if ('mistakes' in data && Array.isArray((data as any).mistakes)) {
+            // Bulk insert simulation
+            isBulk = true;
+            const inputData = data as any;
+            newRecords = inputData.mistakes.map((m: any, idx: number) => ({
+                id: Date.now().toString() + idx,
+                userId: 'mock-user-1',
+                imageData: inputData.originalImage.url,
+                htmlContent: m.html,
+                visualComponent: m.visualComponent, // Ensure visual component is passed
+                answer: m.answer,
+                explanation: m.explanation,
+                tags: m.tags,
+                status: 'active',
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                reviewCount: 0,
+                masteryLevel: 'new',
+                nextReviewAt: Date.now(),
+                originalMistakeId: m.originalMistakeId
+            }));
+        } else {
+            // Single insert
+            const singleData = data as any;
+             newRecords = [{ 
+                ...singleData, 
+                id: Date.now().toString(), 
+                status: 'active', 
+                createdAt: Date.now(), 
+                updatedAt: Date.now(), 
+                reviewCount: 0, 
+                masteryLevel: 'new', 
+                nextReviewAt: Date.now(),
+                userId: 'mock-user-1'
+            }];
+        }
+        
+        const updatedStorage = [...newRecords, ...stored];
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedStorage));
+        
+        if (isBulk) {
+          resolve(newRecords);
+        } else {
+          resolve(newRecords[0]);
+        }
       }, MOCK_DELAY);
     });
   },
@@ -187,57 +234,66 @@ async function fetchWithAuth<T>(endpoint: string, options: RequestInit = {}): Pr
     ...options.headers,
   };
 
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    ...options,
-    headers
-  });
+  try {
+    const res = await fetch(`${BASE_URL}${endpoint}`, {
+      ...options,
+      headers
+    });
 
-  const contentType = res.headers.get("content-type");
-  if (contentType && contentType.includes("text/html")) {
-    throw new Error(`连接后端失败。请确保后端服务运行在 ${BASE_URL}`);
+    const contentType = res.headers.get("content-type");
+    if (contentType && contentType.includes("text/html")) {
+      throw new Error(`连接后端失败。请确保后端服务运行在 ${BASE_URL}`);
+    }
+
+    if (res.status === 401) {
+      auth.logout();
+      throw new Error("Session expired");
+    }
+
+    if (!res.ok) {
+      throw new Error(`API Error: ${res.status} ${res.statusText}`);
+    }
+
+    return res.json();
+  } catch (error) {
+    console.error("Fetch Error:", error);
+    throw error;
   }
-
-  if (res.status === 401) {
-    auth.logout();
-    // 移除window.location.reload()调用，避免页面刷新
-    // 改为返回错误，让调用者处理
-    throw new Error("Session expired");
-  }
-
-  if (!res.ok) {
-    throw new Error(`API Error: ${res.status} ${res.statusText}`);
-  }
-
-  return res.json();
 }
 
 const RealApi: ApiService = {
   getMistakes: async () => {
-    const response = await fetchWithAuth('/api/mistakes');
-    // 从后端返回的对象中提取 data 数组
-    const mistakes = response.data || [];
-    // 转换后端数据结构以匹配前端期望的格式
-    return mistakes.map(mistake => ({
-      ...mistake,
-      htmlContent: mistake.content.html,
-      visualComponent: mistake.content.visualComponent,
-      imageData: mistake.originalImage.url,
-      nextReviewAt: new Date(mistake.srs.nextReviewAt).getTime(),
-      reviewCount: mistake.srs.reviewCount,
-      masteryLevel: mistake.srs.masteryLevel
+    const response: any = await fetchWithAuth('/api/mistakes');
+    // Adapt backend response structure
+    const mistakes = Array.isArray(response) ? response : (response.data || []);
+    
+    return mistakes.map((mistake: any) => ({
+      id: mistake._id || mistake.id,
+      userId: mistake.userId,
+      htmlContent: mistake.content?.html || mistake.htmlContent,
+      visualComponent: mistake.content?.visualComponent || mistake.visualComponent,
+      imageData: mistake.originalImage?.url || mistake.imageData,
+      answer: mistake.answer,
+      explanation: mistake.explanation,
+      tags: mistake.tags || [],
+      status: mistake.status,
+      createdAt: new Date(mistake.createdAt).getTime(),
+      updatedAt: new Date(mistake.updatedAt).getTime(),
+      nextReviewAt: mistake.srs?.nextReviewAt ? new Date(mistake.srs.nextReviewAt).getTime() : Date.now(),
+      reviewCount: mistake.srs?.reviewCount || 0,
+      masteryLevel: mistake.srs?.masteryLevel || 'new'
     }));
   },
   
   addMistake: async (data) => {
-    // Check if data already has the correct format for the backend
+    // Check if data is bulk format
     if ('mistakes' in data && 'originalImage' in data) {
-      // Data is already in the correct format, send it directly
       return fetchWithAuth('/api/mistakes', {
         method: 'POST',
         body: JSON.stringify(data)
       });
     } else {
-      // Data is a single mistake record, format it for the backend
+      // Single record adaptation
       const requestData = {
         originalImage: {
           url: data.imageData || '',
@@ -248,6 +304,7 @@ const RealApi: ApiService = {
           answer: data.answer,
           explanation: data.explanation,
           tags: data.tags,
+          visualComponent: data.visualComponent,
           originalMistakeId: data.originalMistakeId
         }]
       };

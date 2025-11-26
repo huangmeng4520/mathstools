@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MistakeRecord } from './types';
+import { MistakeRecord, AddMistakePayload } from './types';
 import { api } from './services/api';
 
 export function useMistakeManager() {
@@ -28,11 +28,15 @@ export function useMistakeManager() {
     }
   };
 
-  const addMistake = async (record: Omit<MistakeRecord, 'id' | 'createdAt' | 'updatedAt' | 'status'>) => {
+  const addMistake = async (record: AddMistakePayload) => {
     setIsLoading(true); // Optional: global loading or optimistic update
     try {
-      const newRecord = await api.addMistake(record);
-      setMistakes(prev => [newRecord, ...prev]);
+      const result = await api.addMistake(record);
+      if (Array.isArray(result)) {
+        setMistakes(prev => [...result, ...prev]);
+      } else {
+        setMistakes(prev => [result, ...prev]);
+      }
     } catch (e: any) {
       console.error("Add Error:", e);
       // Handle quota error specifically if using Mock LocalStorage
