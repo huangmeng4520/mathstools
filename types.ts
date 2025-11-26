@@ -29,7 +29,7 @@ export interface ReviewResult {
 }
 
 // --- Visual Component Types ---
-export type VisualComponentType = 'clock' | 'block' | 'numberLine' | 'fraction' | 'geometry' | 'none';
+export type VisualComponentType = 'clock' | 'block' | 'numberLine' | 'fraction' | 'geometry' | 'lineSegment' | 'none';
 
 export interface VisualComponentData {
   type: VisualComponentType;
