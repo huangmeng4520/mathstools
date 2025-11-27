@@ -27,12 +27,29 @@ export function useMistakeManager() {
       setMistakes(items);
       setTotalCount(total);
       setError(null);
-    } catch (e) {
+    } catch (e: any) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Ignore "Session expired" as it's handled globally by App.tsx via event listener
+      if (msg === 'Session expired') return;
+      
       console.error("Failed to load mistakes:", e);
       setError("加载数据失败，请检查网络连接");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const getReviewQueue = async (): Promise<MistakeRecord[]> => {
+      try {
+          return await api.getReviewQueue();
+      } catch (e: any) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (msg === 'Session expired') return [];
+
+          console.error("Failed to get review queue", e);
+          setError("获取复习队列失败");
+          return [];
+      }
   };
 
   const addMistake = async (record: AddMistakePayload) => {
@@ -43,7 +60,11 @@ export function useMistakeManager() {
       setPage(1);
       await fetchMistakes(1);
     } catch (e: any) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === 'Session expired') return;
+
       console.error("Add Error:", e);
+
       if (e.name === 'QuotaExceededError' || e.message?.includes('storage')) {
          setError("存储空间已满！请删除旧错题。");
       } else {
@@ -68,7 +89,10 @@ export function useMistakeManager() {
       } else {
           fetchMistakes();
       }
-    } catch (e) {
+    } catch (e: any) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === 'Session expired') return;
+      
       console.error("Delete Error:", e);
       setError("删除失败");
       setMistakes(previous); // Rollback
@@ -79,7 +103,10 @@ export function useMistakeManager() {
     try {
       const updated = await api.reviewMistake(id, success);
       setMistakes(prev => prev.map(m => m.id === id ? updated : m));
-    } catch (e) {
+    } catch (e: any) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === 'Session expired') return;
+
       console.error("Review Error:", e);
       setError("提交复习结果失败");
     }
@@ -93,6 +120,7 @@ export function useMistakeManager() {
     deleteMistake,
     reviewMistake,
     refresh: () => fetchMistakes(page),
+    getReviewQueue,
     // Pagination exports
     page,
     setPage,

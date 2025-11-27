@@ -1,5 +1,7 @@
 
 
+
+
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { 
@@ -25,7 +27,8 @@ import {
   Image as ImageIcon,
   Loader2,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Printer
 } from 'lucide-react';
 import { MistakeRecord, VisualComponentData, Question, AddMistakePayload } from '../types';
 import { ClockVisualizer } from './ClockVisualizer';
@@ -213,7 +216,8 @@ const LineSegmentVisualizer: React.FC<LineSegmentProps> = ({
              )
          })}
       </svg>
-      {label && <div className="mt-2 text-sm text-gray-500 font-bold">{label}</div>}
+      {label && (
+        <div className="mt-2 text-sm text-gray-500 font-bold">{label}</div>}
     </div>
   );
 };
@@ -321,7 +325,7 @@ const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, 
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden mb-6 transition-all hover:shadow-lg">
+    <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden mb-6 transition-all hover:shadow-lg break-inside-avoid">
       <div className="bg-gray-50 px-4 py-3 flex justify-between items-center border-b border-gray-100">
          <div className="flex gap-2">
            {mistake.tags.map(t => (
@@ -459,6 +463,7 @@ interface MistakeNotebookProps {
   setPage?: (page: number) => void;
   limit?: number;
   totalCount?: number;
+  getReviewQueue?: () => Promise<MistakeRecord[]>;
 }
 
 export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({ 
@@ -472,12 +477,17 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   page = 1,
   setPage,
   limit = 5,
-  totalCount = 0
+  totalCount = 0,
+  getReviewQueue
 }) => {
   const [view, setView] = useState<'list' | 'add'>('list');
   const [isProcessing, setIsProcessing] = useState(false);
   const [generatingVariationId, setGeneratingVariationId] = useState<string | null>(null);
   
+  // Print State
+  const [printQueue, setPrintQueue] = useState<MistakeRecord[]>([]);
+  const [isPrinting, setIsPrinting] = useState(false);
+
   // New entry state
   const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null);
   const [newImage, setNewImage] = useState<string | null>(null);
@@ -1001,13 +1011,59 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
     setView('list');
   };
 
+  // --- PRINTING ---
+  const handlePrint = async () => {
+    if (!getReviewQueue) {
+      alert("打印功能初始化失败，请刷新页面重试");
+      return;
+    }
+
+    setIsPrinting(true);
+    try {
+      const queue = await getReviewQueue();
+      if (!queue || queue.length === 0) {
+          alert("当前没有需要复习的错题！");
+          return;
+      }
+      setPrintQueue(queue);
+      
+      // Small delay to allow DOM to render the print view before printing
+      setTimeout(() => {
+        window.print();
+        setIsPrinting(false);
+        // Optional: clear print queue after print dialog closes? 
+        // Browser doesn't strictly tell us when print is done/cancelled.
+      }, 1000);
+    } catch (error) {
+      console.error("Print fetch error:", error);
+      alert("获取复习卷失败");
+      setIsPrinting(false);
+    }
+  };
+
   // --- RENDERING ---
 
   return (
-    <div className="max-w-4xl mx-auto p-4 pb-24">
+    <div className="max-w-4xl mx-auto p-4 pb-24 print:p-0">
+      {/* Add print-specific global styles */}
+      <style>{`
+        @media print {
+          @page {
+            margin: 2cm;
+            size: A4;
+          }
+          body {
+            background: white;
+          }
+          /* Hide everything else */
+          .print\\:hidden {
+            display: none !important;
+          }
+        }
+      `}</style>
       
       {/* HEADER Actions */}
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-6 print:hidden">
         <div>
            <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
              <BookOpen className="w-6 h-6 text-purple-600" />
@@ -1017,13 +1073,24 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
         </div>
         <div className="flex gap-2">
            {view === 'list' && (
-             <button 
-                onClick={handleStartReview}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-xl shadow-md font-bold flex items-center gap-2 hover:bg-indigo-700 transition-colors"
-             >
-                <Play className="w-5 h-5 fill-current" />
-                开始复习
-             </button>
+             <>
+               <button 
+                  onClick={handlePrint}
+                  disabled={isPrinting}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl shadow-sm font-bold flex items-center gap-2 hover:bg-gray-200 transition-colors disabled:opacity-50"
+                  title="打印复习卷"
+               >
+                  {isPrinting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Printer className="w-5 h-5" />}
+                  <span className="hidden md:inline">{isPrinting ? "准备中..." : "打印"}</span>
+               </button>
+               <button 
+                  onClick={handleStartReview}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl shadow-md font-bold flex items-center gap-2 hover:bg-indigo-700 transition-colors"
+               >
+                  <Play className="w-5 h-5 fill-current" />
+                  开始复习
+               </button>
+             </>
            )}
            <button 
              onClick={() => setView(view === 'list' ? 'add' : 'list')}
@@ -1036,7 +1103,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
       {/* ERROR BANNER */}
       {storageError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-6 flex items-center gap-2">
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-6 flex items-center gap-2 print:hidden">
           <AlertTriangle className="w-5 h-5" />
           {storageError}
         </div>
@@ -1044,7 +1111,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
       {/* VIEW: ADD MISTAKE */}
       {view === 'add' && (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 print:hidden">
           {!originalImageSrc ? (
              <div className="border-4 border-dashed border-gray-200 rounded-2xl p-12 text-center hover:bg-blue-50 hover:border-blue-300 transition-colors cursor-pointer relative bg-white">
                <input 
@@ -1255,7 +1322,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
       {/* VIEW: LIST */}
       {view === 'list' && (
-        <div className="space-y-6">
+        <div className="space-y-6 print:hidden">
            {isLoading && mistakes?.length === 0 ? (
               <div className="text-center py-20 text-gray-400">
                 <RefreshCw className="w-10 h-10 animate-spin mx-auto mb-4" />
@@ -1321,7 +1388,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
       {/* MODAL: VARIATION PREVIEW */}
       {showVariationPreview && currentVariation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 print:hidden">
            <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
               <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 flex justify-between items-center text-white shrink-0">
                  <h3 className="font-bold text-lg flex items-center gap-2">
@@ -1376,6 +1443,62 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
            </div>
         </div>
       )}
+
+      {/* PRINT VIEW (HIDDEN ON SCREEN) */}
+      <div className="hidden print:block bg-white text-black p-8">
+         <div className="flex justify-between items-center border-b-2 border-black pb-4 mb-8">
+            <div>
+                <h1 className="text-3xl font-bold mb-1">智能错题本 - 复习卷</h1>
+                <p className="text-sm text-gray-500">生成时间：{new Date().toLocaleDateString()}</p>
+            </div>
+            <div className="border border-black p-4 w-40 h-20 flex flex-col justify-between">
+                <span className="text-xs font-bold uppercase">Score</span>
+                <div className="border-b border-black w-full"></div>
+            </div>
+         </div>
+         
+         {printQueue.length === 0 && !isPrinting ? (
+            <div className="text-center text-gray-500">当前没有需复习的错题</div>
+         ) : (
+            printQueue.map((m, i) => (
+               <div key={m.id} className="mb-12 break-inside-avoid">
+                  <div className="flex justify-between items-start mb-4">
+                     <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-black text-white flex items-center justify-center font-bold text-lg">
+                            {i + 1}
+                        </div>
+                        <div className="flex gap-2">
+                           {m.tags.map(t => (
+                              <span key={t} className="text-xs font-bold border border-black px-2 py-0.5 rounded-full">{t}</span>
+                           ))}
+                        </div>
+                     </div>
+                  </div>
+                  
+                  {/* Content */}
+                  <div className="pl-11">
+                     <div 
+                        className="prose prose-lg max-w-none text-black mb-4" 
+                        dangerouslySetInnerHTML={{__html: m.htmlContent}} 
+                     />
+                     {m.visualComponent && (
+                        <div className="my-4 border-none flex justify-start">
+                           {renderVisualComponent(m.visualComponent)}
+                        </div>
+                     )}
+                     {m.imageData && (
+                       <div className="mt-4 max-w-[300px] opacity-50 print:opacity-80">
+                          <img src={m.imageData} alt="Original" className="max-h-32 object-contain border border-gray-300" />
+                       </div>
+                     )}
+                  </div>
+
+                  {/* Space for working out */}
+                  <div className="mt-8 h-40 border-b border-dashed border-gray-300"></div>
+               </div>
+            ))
+         )}
+      </div>
 
     </div>
   );

@@ -3,12 +3,12 @@ import { MistakeRecord, User, AuthResponse, AddMistakePayload } from '../types';
 /**
  * API Service Layer
  * 
- * Configured for Real Backend at http://localhost:3000
+ * Configured for Real Backend at http://43.153.53.145:4000/
  */
 
 // --- CONFIGURATION ---
-const USE_MOCK_API = true; 
-const BASE_URL = 'http://localhost:3000';
+const USE_MOCK_API = false; 
+const BASE_URL = 'http://43.153.53.145:4000';
 const STORAGE_KEY = 'math_master_mistakes_v2';
 const TOKEN_KEY = 'math_master_token';
 const MOCK_DELAY = 500;
@@ -21,6 +21,7 @@ interface PaginatedResponse {
 
 interface ApiService {
   getMistakes: (page: number, limit: number) => Promise<PaginatedResponse>;
+  getReviewQueue: () => Promise<MistakeRecord[]>;
   addMistake: (mistake: AddMistakePayload) => Promise<MistakeRecord | MistakeRecord[]>;
   deleteMistake: (id: string) => Promise<void>;
   updateMistake: (id: string, updates: Partial<MistakeRecord>) => Promise<MistakeRecord>;
@@ -111,7 +112,8 @@ export const auth = {
       });
       
       if (!res.ok) {
-        localStorage.removeItem(TOKEN_KEY);
+        // Token invalid
+        auth.logout();
         return null;
       }
       
@@ -120,13 +122,14 @@ export const auth = {
     } catch (e) {
       console.warn("Auth Profile Fetch Failed (likely network error), logging out.");
       // 修复：在请求失败时清除token，避免无限循环
-      localStorage.removeItem(TOKEN_KEY);
+      auth.logout();
       return null;
     }
   },
 
   logout: () => {
     localStorage.removeItem(TOKEN_KEY);
+    window.dispatchEvent(new Event('auth:logout'));
   }
 };
 
@@ -151,6 +154,18 @@ const MockApi: ApiService = {
         const items = activeMistakes.slice(startIndex, endIndex);
 
         resolve({ items, total });
+      }, MOCK_DELAY);
+    });
+  },
+  getReviewQueue: async () => {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const json = localStorage.getItem(STORAGE_KEY);
+        let allMistakes: MistakeRecord[] = json ? JSON.parse(json) : [];
+        const now = Date.now();
+        // Filter for active items where nextReviewAt is in the past (due)
+        const due = allMistakes.filter(m => m.status !== 'deleted' && m.nextReviewAt <= now);
+        resolve(due);
       }, MOCK_DELAY);
     });
   },
@@ -281,8 +296,11 @@ async function fetchWithAuth<T>(endpoint: string, options: RequestInit = {}): Pr
     }
     const text = await res.text();
     return text ? JSON.parse(text) : {};
-  } catch (error) {
-    console.error("Fetch Error:", error);
+  } catch (error: any) {
+    // Only log unknown errors, not expected session expirations
+    if (error.message !== "Session expired") {
+      console.error("Fetch Error:", error);
+    }
     throw error;
   }
 }
@@ -340,6 +358,26 @@ const RealApi: ApiService = {
       }));
       
     return { items, total };
+  },
+
+  getReviewQueue: async () => {
+    const rawItems: any[] = await fetchWithAuth('/api/mistakes/review-queue');
+    return rawItems.map((mistake: any) => ({
+        id: mistake._id || mistake.id,
+        userId: mistake.userId,
+        htmlContent: mistake.content?.html || mistake.htmlContent,
+        visualComponent: mistake.content?.visualComponent || mistake.visualComponent,
+        imageData: mistake.originalImage?.url || mistake.imageData,
+        answer: mistake.answer,
+        explanation: mistake.explanation,
+        tags: mistake.tags || [],
+        status: mistake.status,
+        createdAt: new Date(mistake.createdAt).getTime(),
+        updatedAt: new Date(mistake.updatedAt).getTime(),
+        nextReviewAt: mistake.srs?.nextReviewAt ? new Date(mistake.srs.nextReviewAt).getTime() : Date.now(),
+        reviewCount: mistake.srs?.reviewCount || 0,
+        masteryLevel: mistake.srs?.masteryLevel || 'new'
+    }));
   },
   
   addMistake: async (data) => {

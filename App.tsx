@@ -33,6 +33,11 @@ export default function App() {
       setAuthLoading(false);
     };
     checkUser();
+
+    // Listen for logout events from API service (e.g. 401 Token Expired)
+    const handleLogoutEvent = () => setUser(null);
+    window.addEventListener('auth:logout', handleLogoutEvent);
+    return () => window.removeEventListener('auth:logout', handleLogoutEvent);
   }, []);
 
   const handleLogin = (u: User) => {
@@ -239,7 +244,8 @@ export default function App() {
                   stateClass = "border-red-500 bg-red-100 ring-2 ring-red-200";
                 }
               }
-            } else if (isCorrect !== null && opt.id === currentQuestion.correctId) {
+            } else if (isCorrect !== null && opt.id === currentQuestion.correctId && selectedOption) {
+               // Also show correct answer if user picked wrong
                stateClass = "border-green-500 bg-green-50 border-dashed";
             }
 
@@ -381,6 +387,7 @@ export default function App() {
                setPage={mistakeManager.setPage}
                limit={mistakeManager.limit}
                totalCount={mistakeManager.totalCount}
+               getReviewQueue={mistakeManager.getReviewQueue}
              />
            )
         )}
