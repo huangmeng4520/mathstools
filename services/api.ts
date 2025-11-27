@@ -7,7 +7,7 @@ import { MistakeRecord, User, AuthResponse, AddMistakePayload } from '../types';
  */
 
 // --- CONFIGURATION ---
-const USE_MOCK_API = false; 
+const USE_MOCK_API = true; 
 const BASE_URL = 'http://localhost:3000';
 const STORAGE_KEY = 'math_master_mistakes_v2';
 const TOKEN_KEY = 'math_master_token';

@@ -46,7 +46,7 @@ export default function App() {
     setUser(null);
   };
 
-  const [appMode, setAppMode] = useState<'quiz' | 'notebook' | 'review-game'>('quiz');
+  const [appMode, setAppMode] = useState<'quiz' | 'notebook' | 'review-game'>('notebook');
   
   // --- Global Mistake State ---
   // Only load if user is authenticated
@@ -325,18 +325,18 @@ export default function App() {
       <nav className="bg-white border-b border-gray-200 px-4 py-2 flex justify-between items-center sticky top-0 z-50 shadow-sm">
         <div className="flex gap-4">
           <button 
-            onClick={() => { setAppMode('quiz'); setGameState(QuizState.START); }}
-            className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors ${appMode === 'quiz' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
-          >
-            <Calculator className="w-4 h-4" />
-            <span className="hidden md:inline">算理闯关</span>
-          </button>
-          <button 
             onClick={() => setAppMode('notebook')}
             className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors ${appMode === 'notebook' ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:bg-gray-100'}`}
           >
             <BookOpen className="w-4 h-4" />
             <span className="hidden md:inline">智能错题本</span>
+          </button>
+          <button 
+            onClick={() => { setAppMode('quiz'); setGameState(QuizState.START); }}
+            className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold transition-colors ${appMode === 'quiz' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
+          >
+            <Calculator className="w-4 h-4" />
+            <span className="hidden md:inline">算理闯关</span>
           </button>
         </div>
         
