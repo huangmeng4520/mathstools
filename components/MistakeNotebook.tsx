@@ -21,7 +21,8 @@ import {
   XCircle,
   Save,
   Move,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Loader2
 } from 'lucide-react';
 import { MistakeRecord, VisualComponentData, Question, AddMistakePayload } from '../types';
 import { ClockVisualizer } from './ClockVisualizer';
@@ -57,17 +58,38 @@ const renderMath = (latex: string, displayMode: boolean): string => {
 };
 
 const processContent = (text: string): string => {
-  // 1. Math placeholders to prevent markdown processing inside math
+  // 1. Math extraction - Protect Math segments
   const mathSegments: string[] = [];
-  const placeholdered = text.replace(/(\$\$[\s\S]+?\$\$|\$[^$]+?\$)/g, (match) => {
+  let processed = text.replace(/(\$\$[\s\S]+?\$\$|\$[^$]+?\$)/g, (match) => {
     mathSegments.push(match);
     return `%%%MATH${mathSegments.length - 1}%%%`;
   });
 
-  // 2. Process Markdown Bold ( **text** -> <strong>text</strong> )
-  let processed = placeholdered.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // 2. Headers
+  processed = processed.replace(/^### (.*$)/gm, '<h3 class="text-lg font-bold my-2 text-gray-800">$1</h3>');
+  processed = processed.replace(/^## (.*$)/gm, '<h2 class="text-xl font-bold my-3 text-gray-800">$1</h2>');
+  processed = processed.replace(/^# (.*$)/gm, '<h1 class="text-2xl font-bold my-4 text-gray-800">$1</h1>');
 
-  // 3. Restore Math and render to HTML
+  // 3. Bold
+  processed = processed.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+  // 4. Code Blocks (simple backticks)
+  processed = processed.replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 rounded font-mono text-sm text-red-600">$1</code>');
+
+  // 5. Lists
+  // Unordered Lists: lines starting with "- " or "* "
+  processed = processed.replace(/(?:^|\n)((?:[-*] .+(?:\n|$))+)/g, (match, list) => {
+      const items = list.trim().split('\n').map((line: string) => `<li>${line.replace(/^[-*] /, '')}</li>`).join('');
+      return `\n<ul class="list-disc pl-5 space-y-1 my-2">${items}</ul>\n`;
+  });
+
+  // Ordered Lists: lines starting with "1. "
+  processed = processed.replace(/(?:^|\n)((?:\d+\. .+(?:\n|$))+)/g, (match, list) => {
+      const items = list.trim().split('\n').map((line: string) => `<li>${line.replace(/^\d+\. /, '')}</li>`).join('');
+      return `\n<ol class="list-decimal pl-5 space-y-1 my-2">${items}</ol>\n`;
+  });
+
+  // 6. Restore Math and render to HTML
   processed = processed.replace(/%%%MATH(\d+)%%%/g, (_, index) => {
     const idx = parseInt(index, 10);
     const match = mathSegments[idx];
@@ -91,12 +113,16 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
 
   const trimmedContent = content.trim();
 
-  // If content starts with block HTML tags, treat as raw block and don't split by paragraphs
-  if (trimmedContent.match(/^<(div|table|ul|ol|pre|blockquote|h[1-6])/i)) {
-      return <div className="leading-relaxed text-gray-800" dangerouslySetInnerHTML={{__html: processContent(trimmedContent)}} />;
+  // Check if content contains block HTML tags. 
+  // If it does, we avoid splitting by paragraphs to preserve HTML structure (like tables).
+  const hasBlockHtml = /<(table|div|ul|ol|h[1-6]|p|blockquote|pre)/i.test(trimmedContent);
+
+  if (hasBlockHtml) {
+      // For mixed content, we process Markdown syntax but rely on the user/HTML for layout
+      return <div className="leading-relaxed text-gray-800 break-words" dangerouslySetInnerHTML={{__html: processContent(trimmedContent)}} />;
   }
 
-  // Normalize newlines and split by paragraphs
+  // If no block HTML, assumes standard Markdown text. Split by paragraphs for better spacing.
   const normalized = content.replace(/\r\n/g, '\n');
   const sections = normalized.split(/\n\n+/);
   
@@ -105,42 +131,9 @@ const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
       {sections.map((sec, idx) => {
          const trimmed = sec.trim();
          if (!trimmed) return null;
-
-         // Check for bullet list
-         if (trimmed.match(/^[-*]\s/)) {
-            const lines = trimmed.split('\n');
-            if (lines.length > 0) {
-                return (
-                  <ul key={idx} className="list-disc pl-5 space-y-1">
-                    {lines.map((line, liIdx) => {
-                      const cleanLine = line.replace(/^[-*]\s/, '');
-                      return (
-                        <li key={liIdx} dangerouslySetInnerHTML={{__html: processContent(cleanLine)}} />
-                      );
-                    })}
-                  </ul>
-                );
-            }
-         }
-         // Check for numbered list
-         if (trimmed.match(/^\d+\.\s/)) {
-            const lines = trimmed.split('\n');
-            if (lines.length > 0) {
-               return (
-                 <ol key={idx} className="list-decimal pl-5 space-y-1">
-                   {lines.map((line, liIdx) => {
-                     const cleanLine = line.replace(/^\d+\.\s/, '');
-                     return (
-                       <li key={liIdx} dangerouslySetInnerHTML={{__html: processContent(cleanLine)}} />
-                     );
-                   })}
-                 </ol>
-               );
-            }
-         }
          
          return (
-            <div key={idx} className="leading-relaxed text-gray-800" dangerouslySetInnerHTML={{__html: processContent(trimmed)}} />
+            <div key={idx} className="leading-relaxed text-gray-800 break-words" dangerouslySetInnerHTML={{__html: processContent(trimmed)}} />
          );
       })}
     </div>
@@ -302,9 +295,10 @@ interface MistakeCardProps {
   onDelete: (id: string) => void;
   onReview: (id: string, success: boolean) => void;
   onGenerateVariation: (mistake: MistakeRecord) => void;
+  isGenerating?: boolean;
 }
 
-const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, onGenerateVariation }) => {
+const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, onGenerateVariation, isGenerating }) => {
   const isDue = Date.now() > mistake.nextReviewAt;
   const [showAnswer, setShowAnswer] = useState(false);
   const [showFullImage, setShowFullImage] = useState(false);
@@ -403,7 +397,7 @@ const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, 
                   {/* Answer and Explanation */}
                   <div className="bg-green-50 p-5 rounded-xl border border-green-100 shadow-sm">
                     <div className="font-bold text-green-900 text-lg mb-3 flex items-start gap-2 border-b border-green-200/50 pb-2">
-                      <span className="bg-green-200 text-green-800 text-xs px-2 py-0.5 rounded uppercase tracking-wider mt-1">Answer</span>
+                      <span className="bg-green-200 text-green-800 text-xs px-2 py-0.5 rounded uppercase tracking-wider mt-1 flex-shrink-0">Answer</span>
                       <div className="flex-1 text-gray-900">
                         <MarkdownRenderer content={mistake.answer} />
                       </div>
@@ -420,10 +414,11 @@ const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, 
 
                   <button 
                      onClick={() => onGenerateVariation(mistake)}
-                     className="w-full py-3 border-2 border-purple-100 text-purple-600 bg-white rounded-xl text-base font-bold hover:bg-purple-50 flex items-center justify-center gap-2 transition-colors"
+                     disabled={isGenerating}
+                     className={`w-full py-3 border-2 border-purple-100 text-purple-600 bg-white rounded-xl text-base font-bold hover:bg-purple-50 flex items-center justify-center gap-2 transition-colors ${isGenerating ? 'opacity-70 cursor-not-allowed' : ''}`}
                   >
-                    <Wand2 className="w-5 h-5" />
-                    AI 生成变式练习
+                    {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wand2 className="w-5 h-5" />}
+                    {isGenerating ? '正在生成...' : 'AI 生成变式练习'}
                   </button>
                 </div>
               )}
@@ -455,6 +450,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 }) => {
   const [view, setView] = useState<'list' | 'add'>('list');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [generatingVariationId, setGeneratingVariationId] = useState<string | null>(null);
   
   // New entry state
   const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null);
@@ -601,7 +597,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
   // --- VARIATION GENERATION ---
   const handleGenerateVariation = async (mistake: MistakeRecord) => {
-    setIsProcessing(true);
+    setGeneratingVariationId(mistake.id);
     setCurrentOriginalMistake(mistake);
     
     try {
@@ -654,7 +650,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
         alert("生成变式题失败，请重试");
       }
     } finally {
-      setIsProcessing(false);
+      setGeneratingVariationId(null);
     }
   };
 
@@ -1260,6 +1256,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                    onDelete={deleteMistake}
                    onReview={reviewMistake}
                    onGenerateVariation={handleGenerateVariation}
+                   isGenerating={generatingVariationId === mistake.id}
                  />
                ))}
              </div>

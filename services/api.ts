@@ -3,14 +3,13 @@ import { MistakeRecord, User, AuthResponse, AddMistakePayload } from '../types';
 /**
  * API Service Layer
  * 
- * Configured for Real Backend at http://localhost:3000
+ * Configured for Real Backend at http://129.204.35.20:4000
  */
 
 // --- CONFIGURATION ---
-// CHANGED: Reverted to TRUE to ensure app runs without backend connection errors by default.
-// Set this to FALSE only when your local backend (localhost:3000) is running and CORS is configured.
+// CHANGED: Revert to TRUE to use Mock API because the real backend is unreachable (Failed to fetch).
 const USE_MOCK_API = true; 
-const BASE_URL = 'http://localhost:3000';
+const BASE_URL = 'http://129.204.35.20:4000';
 const STORAGE_KEY = 'math_master_mistakes_v2';
 const TOKEN_KEY = 'math_master_token';
 const MOCK_DELAY = 500;
