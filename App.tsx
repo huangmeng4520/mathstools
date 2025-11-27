@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { QUESTIONS } from './constants';
 import { QuizState, Question, ReviewResult, User } from './types';
@@ -355,7 +356,7 @@ export default function App() {
       </nav>
 
       <div className="flex-1 flex flex-col">
-        {mistakeManager.isLoading && appMode === 'notebook' ? (
+        {mistakeManager.isLoading && appMode === 'notebook' && mistakeManager.mistakes.length === 0 ? (
            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-gray-500">
              <Loader2 className="w-10 h-10 animate-spin text-purple-600" />
              <p>正在同步云端数据...</p>
@@ -376,6 +377,10 @@ export default function App() {
                deleteMistake={mistakeManager.deleteMistake}
                reviewMistake={mistakeManager.reviewMistake}
                onStartReview={handleStartReviewGame}
+               page={mistakeManager.page}
+               setPage={mistakeManager.setPage}
+               limit={mistakeManager.limit}
+               totalCount={mistakeManager.totalCount}
              />
            )
         )}

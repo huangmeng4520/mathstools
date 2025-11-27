@@ -3,19 +3,24 @@ import { MistakeRecord, User, AuthResponse, AddMistakePayload } from '../types';
 /**
  * API Service Layer
  * 
- * Configured for Real Backend at http://129.204.35.20:4000
+ * Configured for Real Backend at http://localhost:3000
  */
 
 // --- CONFIGURATION ---
-const USE_MOCK_API = true; 
-const BASE_URL = 'http://129.204.35.20:4000';
+const USE_MOCK_API = false; 
+const BASE_URL = 'http://localhost:3000';
 const STORAGE_KEY = 'math_master_mistakes_v2';
 const TOKEN_KEY = 'math_master_token';
 const MOCK_DELAY = 500;
 
 // --- Interface ---
+interface PaginatedResponse {
+  items: MistakeRecord[];
+  total: number;
+}
+
 interface ApiService {
-  getMistakes: () => Promise<MistakeRecord[]>;
+  getMistakes: (page: number, limit: number) => Promise<PaginatedResponse>;
   addMistake: (mistake: AddMistakePayload) => Promise<MistakeRecord | MistakeRecord[]>;
   deleteMistake: (id: string) => Promise<void>;
   updateMistake: (id: string, updates: Partial<MistakeRecord>) => Promise<MistakeRecord>;
@@ -127,11 +132,25 @@ export const auth = {
 
 // --- Mock Implementation (LocalStorage) ---
 const MockApi: ApiService = {
-  getMistakes: async () => {
+  getMistakes: async (page = 1, limit = 5) => {
     return new Promise((resolve) => {
       setTimeout(() => {
         const json = localStorage.getItem(STORAGE_KEY);
-        resolve(json ? JSON.parse(json) : []);
+        let allMistakes: MistakeRecord[] = json ? JSON.parse(json) : [];
+        
+        // 1. Filter deleted
+        const activeMistakes = allMistakes.filter(m => m.status !== 'deleted');
+        
+        // 2. Sort by nextReviewAt asc (urgent first) or createdAt desc
+        activeMistakes.sort((a, b) => b.createdAt - a.createdAt);
+
+        // 3. Pagination
+        const total = activeMistakes.length;
+        const startIndex = (page - 1) * limit;
+        const endIndex = startIndex + limit;
+        const items = activeMistakes.slice(startIndex, endIndex);
+
+        resolve({ items, total });
       }, MOCK_DELAY);
     });
   },
@@ -176,7 +195,7 @@ const MockApi: ApiService = {
                 updatedAt: Date.now(), 
                 reviewCount: 0, 
                 masteryLevel: 'new', 
-                nextReviewAt: Date.now(),
+                nextReviewAt: Date.now(), 
                 userId: 'mock-user-1'
             }];
         }
@@ -196,7 +215,11 @@ const MockApi: ApiService = {
     return new Promise((resolve) => {
       setTimeout(() => {
         const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(stored.filter((m: any) => m.id !== id)));
+        // Soft delete for mock
+        const updated = stored.map((m: MistakeRecord) => 
+            m.id === id ? { ...m, status: 'deleted' } : m
+        );
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
         resolve();
       }, MOCK_DELAY);
     });
@@ -265,13 +288,40 @@ async function fetchWithAuth<T>(endpoint: string, options: RequestInit = {}): Pr
 }
 
 const RealApi: ApiService = {
-  getMistakes: async () => {
-    const response: any = await fetchWithAuth('/api/mistakes');
-    // Adapt backend response structure
-    const mistakes = Array.isArray(response) ? response : (response.data || []);
+  getMistakes: async (page = 1, limit = 5) => {
+    // Pass pagination and filter deleted.
+    // IMPORTANT: We manually construct the query string to ensure the comma is NOT encoded.
+    // URLSearchParams would encode ',' to '%2C', which some backends might fail to split correctly.
+    // Sending literal 'active,processing' ensures backend split(',') works.
+    const query = `page=${page}&limit=${limit}&status=active,processing`;
+
+    // Debug log to help identify User ID mismatch issues
+    console.debug(`[API] Fetching mistakes. Page: ${page}, Limit: ${limit}`);
+
+    const response: any = await fetchWithAuth(`/api/mistakes?${query}`);
     
-    return mistakes
-      .filter((mistake: any) => mistake.status !== 'deleted') // Filter out soft-deleted items
+    // Expecting response format: { data: [...], total: 100, page: 1, ... }
+    // OR array if not updated yet.
+    
+    let rawItems: any[] = [];
+    let total = 0;
+
+    if (Array.isArray(response)) {
+        // Fallback if backend doesn't support pagination object yet
+        rawItems = response;
+        total = response.length;
+    } else if (response.data && Array.isArray(response.data)) {
+        // Standard paginated response
+        rawItems = response.data;
+        total = response.total || response.count || rawItems.length;
+    }
+
+    if (rawItems.length === 0) {
+      console.warn("[API] Received 0 items. Check if your current logged-in User ID matches the data owner in MongoDB.");
+    }
+
+    const items = rawItems
+      .filter((mistake: any) => mistake.status !== 'deleted') // Extra safety
       .map((mistake: any) => ({
         id: mistake._id || mistake.id,
         userId: mistake.userId,
@@ -288,6 +338,8 @@ const RealApi: ApiService = {
         reviewCount: mistake.srs?.reviewCount || 0,
         masteryLevel: mistake.srs?.masteryLevel || 'new'
       }));
+      
+    return { items, total };
   },
   
   addMistake: async (data) => {

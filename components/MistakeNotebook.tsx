@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { 
@@ -22,7 +23,9 @@ import {
   Save,
   Move,
   Image as ImageIcon,
-  Loader2
+  Loader2,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { MistakeRecord, VisualComponentData, Question, AddMistakePayload } from '../types';
 import { ClockVisualizer } from './ClockVisualizer';
@@ -451,16 +454,25 @@ interface MistakeNotebookProps {
   deleteMistake: (id: string) => void;
   reviewMistake: (id: string, success: boolean) => void;
   onStartReview: (questions: Question[]) => void;
+  // Pagination Props
+  page?: number;
+  setPage?: (page: number) => void;
+  limit?: number;
+  totalCount?: number;
 }
 
 export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({ 
-  mistakes, 
+  mistakes = [], 
   storageError, 
   isLoading, 
   addMistake, 
   deleteMistake, 
   reviewMistake,
-  onStartReview
+  onStartReview,
+  page = 1,
+  setPage,
+  limit = 5,
+  totalCount = 0
 }) => {
   const [view, setView] = useState<'list' | 'add'>('list');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -488,6 +500,8 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  const totalPages = Math.ceil(totalCount / limit);
 
   // --- HELPER: Call AI with Retry (Exponential Backoff) ---
   const callAiWithRetry = async (apiCall: () => Promise<any>, retries = 3): Promise<any> => {
@@ -515,7 +529,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   // --- REVIEW QUIZ GENERATION ---
   const handleStartReview = async () => {
     // 1. Filter due mistakes
-    const dueMistakes = mistakes.filter(m => Date.now() > m.nextReviewAt).slice(0, 5); 
+    const dueMistakes = mistakes?.filter(m => Date.now() > m.nextReviewAt).slice(0, 5) || []; 
     if (dueMistakes.length === 0) {
       alert("当前没有需要复习的错题！");
       return;
@@ -999,7 +1013,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
              <BookOpen className="w-6 h-6 text-purple-600" />
              智能错题本
            </h2>
-           <p className="text-gray-500 text-sm">已收录 {mistakes.length} 道错题，{mistakes.filter(m => Date.now() > m.nextReviewAt).length} 道待复习</p>
+           <p className="text-gray-500 text-sm">已收录 {totalCount} 道错题，{mistakes?.filter(m => Date.now() > m.nextReviewAt).length} 道待复习</p>
         </div>
         <div className="flex gap-2">
            {view === 'list' && (
@@ -1242,12 +1256,12 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
       {/* VIEW: LIST */}
       {view === 'list' && (
         <div className="space-y-6">
-           {isLoading && mistakes.length === 0 ? (
+           {isLoading && mistakes?.length === 0 ? (
               <div className="text-center py-20 text-gray-400">
                 <RefreshCw className="w-10 h-10 animate-spin mx-auto mb-4" />
                 加载中...
               </div>
-           ) : mistakes.length === 0 ? (
+           ) : mistakes?.length === 0 ? (
               <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-300">
                  <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <BookOpen className="w-10 h-10 text-gray-400" />
@@ -1262,18 +1276,45 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                  </button>
               </div>
            ) : (
-             <div className="grid gap-6">
-               {mistakes.map(mistake => (
-                 <MistakeCard 
-                   key={mistake.id} 
-                   mistake={mistake} 
-                   onDelete={deleteMistake}
-                   onReview={reviewMistake}
-                   onGenerateVariation={handleGenerateVariation}
-                   isGenerating={generatingVariationId === mistake.id}
-                 />
-               ))}
-             </div>
+             <>
+               <div className="grid gap-6">
+                 {mistakes?.map(mistake => (
+                   <MistakeCard 
+                     key={mistake.id} 
+                     mistake={mistake} 
+                     onDelete={deleteMistake}
+                     onReview={reviewMistake}
+                     onGenerateVariation={handleGenerateVariation}
+                     isGenerating={generatingVariationId === mistake.id}
+                   />
+                 ))}
+               </div>
+               
+               {/* PAGINATION */}
+               {totalPages > 1 && setPage && (
+                 <div className="flex items-center justify-center gap-4 mt-8">
+                    <button 
+                       onClick={() => setPage(Math.max(1, page - 1))}
+                       disabled={page === 1 || isLoading}
+                       className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 border border-gray-200 bg-white"
+                    >
+                       <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    
+                    <span className="text-sm font-bold text-gray-600">
+                       第 {page} 页 / 共 {totalPages} 页
+                    </span>
+
+                    <button 
+                       onClick={() => setPage(Math.min(totalPages, page + 1))}
+                       disabled={page === totalPages || isLoading}
+                       className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 border border-gray-200 bg-white"
+                    >
+                       <ChevronRight className="w-5 h-5" />
+                    </button>
+                 </div>
+               )}
+             </>
            )}
         </div>
       )}
