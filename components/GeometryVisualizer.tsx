@@ -2,6 +2,15 @@ import React from 'react';
 
 type ShapeType = 'rectangle' | 'square' | 'triangle' | 'parallelogram' | 'trapezoid';
 
+interface GeometryLabels {
+  top?: string;
+  bottom?: string;
+  left?: string;
+  right?: string;
+  height?: string;
+  center?: string; // e.g. "Area?"
+}
+
 interface GeometryVisualizerProps {
   shape: ShapeType;
   // Normalized visual props (roughly 0-100 range works best)
@@ -10,14 +19,7 @@ interface GeometryVisualizerProps {
   topWidth?: number; // for trapezoid
   offset?: number; // for triangle peak offset or parallelogram slant
   showHeight?: boolean; // Draw altitude line
-  labels?: {
-      top?: string;
-      bottom?: string;
-      left?: string;
-      right?: string;
-      height?: string;
-      center?: string; // e.g. "Area?"
-  };
+  labels?: GeometryLabels;
 }
 
 export const GeometryVisualizer: React.FC<GeometryVisualizerProps> = ({
@@ -27,7 +29,7 @@ export const GeometryVisualizer: React.FC<GeometryVisualizerProps> = ({
   topWidth = 60,
   offset = 20,
   showHeight = false,
-  labels = {}
+  labels = {} as GeometryLabels
 }) => {
   const viewBoxW = Math.max(width, topWidth + offset) + 40;
   const viewBoxH = height + 40;

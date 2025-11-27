@@ -19,7 +19,9 @@ import {
   AlertTriangle,
   Play,
   XCircle,
-  Save
+  Save,
+  Move,
+  Image as ImageIcon
 } from 'lucide-react';
 import { MistakeRecord, VisualComponentData, Question, AddMistakePayload } from '../types';
 import { ClockVisualizer } from './ClockVisualizer';
@@ -38,37 +40,111 @@ const VISUAL_COMPONENT_INSTRUCTION = `
 5. 线段图 (lineSegment): { "type": "lineSegment", "props": { "total": number|null, "totalLabel": "string", "segments": [{"value": number, "label": "string", "color": "string"}], "points": [{"label": "string", "at": "start"|"end"}] } }
 `;
 
-// --- HELPER: Markdown Renderer ---
-const renderMarkdown = (text: string) => {
-  if (!text) return null;
-  
-  return text.split('\n').map((line, index) => {
-    const isList = line.trim().match(/^(\d+\.|-|\*)\s/);
-    const cleanLine = line.replace(/^(\d+\.|-|\*)\s/, '');
-    
-    const parts = cleanLine.split(/(\*\*.*?\*\*)/g);
-    const renderedParts = parts.map((part, i) => {
-      if (part.startsWith('**') && part.endsWith('**')) {
-        return <strong key={i} className="font-bold text-gray-900 bg-yellow-50 px-1 rounded">{part.slice(2, -2)}</strong>;
-      }
-      return part;
-    });
+// --- MARKDOWN & MATH RENDERER ---
 
-    if (isList) {
-      return (
-        <div key={index} className="flex gap-2 mb-1 ml-2">
-           <span className="font-bold text-blue-500 select-none">•</span>
-           <div className="leading-relaxed text-gray-700">{renderedParts}</div>
-        </div>
-      );
+const renderMath = (latex: string, displayMode: boolean): string => {
+  if (typeof window !== 'undefined' && (window as any).katex) {
+    try {
+      return (window as any).katex.renderToString(latex, {
+        displayMode,
+        throwOnError: false
+      });
+    } catch (e) {
+      console.warn("KaTeX render error", e);
     }
+  }
+  return latex;
+};
 
-    return (
-      <div key={index} className={`leading-relaxed text-gray-700 ${line.trim() === '' ? 'h-2' : 'mb-1'}`}>
-        {renderedParts}
-      </div>
-    );
+const processContent = (text: string): string => {
+  // 1. Math placeholders to prevent markdown processing inside math
+  const mathSegments: string[] = [];
+  const placeholdered = text.replace(/(\$\$[\s\S]+?\$\$|\$[^$]+?\$)/g, (match) => {
+    mathSegments.push(match);
+    return `%%%MATH${mathSegments.length - 1}%%%`;
   });
+
+  // 2. Process Markdown Bold ( **text** -> <strong>text</strong> )
+  let processed = placeholdered.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+  // 3. Restore Math and render to HTML
+  processed = processed.replace(/%%%MATH(\d+)%%%/g, (_, index) => {
+    const idx = parseInt(index, 10);
+    const match = mathSegments[idx];
+    if (match.startsWith('$$')) {
+       // Block math
+       const latex = match.slice(2, -2);
+       const html = renderMath(latex, true);
+       return `<div class="my-2 overflow-x-auto">${html}</div>`;
+    } else {
+       // Inline math
+       const latex = match.slice(1, -1);
+       return renderMath(latex, false);
+    }
+  });
+
+  return processed;
+};
+
+const MarkdownRenderer: React.FC<{ content: string }> = ({ content }) => {
+  if (!content) return null;
+
+  const trimmedContent = content.trim();
+
+  // If content starts with block HTML tags, treat as raw block and don't split by paragraphs
+  if (trimmedContent.match(/^<(div|table|ul|ol|pre|blockquote|h[1-6])/i)) {
+      return <div className="leading-relaxed text-gray-800" dangerouslySetInnerHTML={{__html: processContent(trimmedContent)}} />;
+  }
+
+  // Normalize newlines and split by paragraphs
+  const normalized = content.replace(/\r\n/g, '\n');
+  const sections = normalized.split(/\n\n+/);
+  
+  return (
+    <div className="space-y-3">
+      {sections.map((sec, idx) => {
+         const trimmed = sec.trim();
+         if (!trimmed) return null;
+
+         // Check for bullet list
+         if (trimmed.match(/^[-*]\s/)) {
+            const lines = trimmed.split('\n');
+            if (lines.length > 0) {
+                return (
+                  <ul key={idx} className="list-disc pl-5 space-y-1">
+                    {lines.map((line, liIdx) => {
+                      const cleanLine = line.replace(/^[-*]\s/, '');
+                      return (
+                        <li key={liIdx} dangerouslySetInnerHTML={{__html: processContent(cleanLine)}} />
+                      );
+                    })}
+                  </ul>
+                );
+            }
+         }
+         // Check for numbered list
+         if (trimmed.match(/^\d+\.\s/)) {
+            const lines = trimmed.split('\n');
+            if (lines.length > 0) {
+               return (
+                 <ol key={idx} className="list-decimal pl-5 space-y-1">
+                   {lines.map((line, liIdx) => {
+                     const cleanLine = line.replace(/^\d+\.\s/, '');
+                     return (
+                       <li key={liIdx} dangerouslySetInnerHTML={{__html: processContent(cleanLine)}} />
+                     );
+                   })}
+                 </ol>
+               );
+            }
+         }
+         
+         return (
+            <div key={idx} className="leading-relaxed text-gray-800" dangerouslySetInnerHTML={{__html: processContent(trimmed)}} />
+         );
+      })}
+    </div>
+  );
 };
 
 // --- LOCAL COMPONENTS ---
@@ -328,10 +404,12 @@ const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, 
                   <div className="bg-green-50 p-5 rounded-xl border border-green-100 shadow-sm">
                     <div className="font-bold text-green-900 text-lg mb-3 flex items-start gap-2 border-b border-green-200/50 pb-2">
                       <span className="bg-green-200 text-green-800 text-xs px-2 py-0.5 rounded uppercase tracking-wider mt-1">Answer</span>
-                      <div className="flex-1 text-gray-900">{renderMarkdown(mistake.answer)}</div>
+                      <div className="flex-1 text-gray-900">
+                        <MarkdownRenderer content={mistake.answer} />
+                      </div>
                     </div>
                     <div className="text-sm bg-white p-4 rounded-lg border border-green-100/50 text-gray-700 leading-relaxed shadow-sm">
-                      {renderMarkdown(mistake.explanation)}
+                      <MarkdownRenderer content={mistake.explanation} />
                     </div>
                   </div>
                   
@@ -392,7 +470,10 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   // Cropping State
   const [cropRect, setCropRect] = useState<{x: number, y: number, w: number, h: number} | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [dragMode, setDragMode] = useState<'create' | 'move' | 'tl' | 'tr' | 'bl' | 'br' | null>(null);
   const [startPos, setStartPos] = useState<{x: number, y: number} | null>(null);
+  const [dragStartRect, setDragStartRect] = useState<{x: number, y: number, w: number, h: number} | null>(null);
+
   const imageRef = useRef<HTMLImageElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -504,7 +585,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
             ),
             options: shuffled,
             correctId: 'correct',
-            explanation: renderMarkdown(mistake.explanation),
+            explanation: <MarkdownRenderer content={mistake.explanation} />,
             hint: '回想一下之前整理错题时的思路'
         });
       }
@@ -545,7 +626,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
              "props": { ... }
           },
           "answer": "新题答案",
-          "explanation": "新题解析（Markdown格式）",
+          "explanation": "新题解析（Markdown格式，支持$$LaTeX$$公式）",
           "tags": ["标签1", "标签2"]
         }
 
@@ -637,41 +718,135 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
     return { x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY };
   };
 
+  const getInteractionType = (x: number, y: number, rect: {x:number, y:number, w:number, h:number}) => {
+     if (!rect) return 'create';
+     const BUFFER = 20; // Hit test buffer for handles
+     
+     // Check corners
+     // Top-Left
+     if (Math.abs(x - rect.x) < BUFFER && Math.abs(y - rect.y) < BUFFER) return 'tl';
+     // Top-Right
+     if (Math.abs(x - (rect.x + rect.w)) < BUFFER && Math.abs(y - rect.y) < BUFFER) return 'tr';
+     // Bottom-Left
+     if (Math.abs(x - rect.x) < BUFFER && Math.abs(y - (rect.y + rect.h)) < BUFFER) return 'bl';
+     // Bottom-Right
+     if (Math.abs(x - (rect.x + rect.w)) < BUFFER && Math.abs(y - (rect.y + rect.h)) < BUFFER) return 'br';
+     
+     // Check inside for move
+     if (x > rect.x && x < rect.x + rect.w && y > rect.y && y < rect.y + rect.h) return 'move';
+     
+     return 'create';
+  };
+
   const handleCropMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
     if (!imageRef.current) return;
     const rect = imageRef.current.getBoundingClientRect();
     const pos = getClientPos(e);
     const x = pos.x - rect.left;
     const y = pos.y - rect.top;
+
+    // Determine mode
+    let mode = 'create';
+    if (cropRect) {
+        mode = getInteractionType(x, y, cropRect);
+    }
+    
+    setDragMode(mode as any);
     setStartPos({x, y});
     setIsDragging(true);
-    setCropRect({x, y, w: 0, h: 0});
+
+    if (mode === 'create') {
+        setCropRect({x, y, w: 0, h: 0});
+        setDragStartRect(null);
+    } else {
+        setDragStartRect(cropRect);
+    }
   };
 
   const handleCropMouseMove = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDragging || !startPos || !imageRef.current) return;
-    e.preventDefault();
+    if (!imageRef.current) return;
     const rect = imageRef.current.getBoundingClientRect();
     const pos = getClientPos(e);
     const currentX = pos.x - rect.left;
     const currentY = pos.y - rect.top;
-    let x = Math.min(currentX, startPos.x);
-    let y = Math.min(currentY, startPos.y);
-    let w = Math.abs(currentX - startPos.x);
-    let h = Math.abs(currentY - startPos.y);
 
-    // Boundary checks
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (x + w > rect.width) w = rect.width - x;
-    if (y + h > rect.height) h = rect.height - y;
+    // Change cursor based on hover if not dragging
+    if (!isDragging) {
+       const hoverMode = cropRect ? getInteractionType(currentX, currentY, cropRect) : 'create';
+       let cursor = 'crosshair';
+       if (hoverMode === 'move') cursor = 'move';
+       if (hoverMode === 'tl' || hoverMode === 'br') cursor = 'nwse-resize';
+       if (hoverMode === 'tr' || hoverMode === 'bl') cursor = 'nesw-resize';
+       imageRef.current.style.cursor = cursor;
+       return;
+    }
 
-    setCropRect({x, y, w, h});
+    // Handle Dragging
+    if (!startPos) return;
+    e.preventDefault();
+
+    const dx = currentX - startPos.x;
+    const dy = currentY - startPos.y;
+
+    if (dragMode === 'create') {
+        let x = Math.min(currentX, startPos.x);
+        let y = Math.min(currentY, startPos.y);
+        let w = Math.abs(currentX - startPos.x);
+        let h = Math.abs(currentY - startPos.y);
+        
+        // Bounds check
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x + w > rect.width) w = rect.width - x;
+        if (y + h > rect.height) h = rect.height - y;
+        
+        setCropRect({x, y, w, h});
+    } else if (dragMode === 'move' && dragStartRect) {
+        let newX = dragStartRect.x + dx;
+        let newY = dragStartRect.y + dy;
+        
+        // Bounds check
+        if (newX < 0) newX = 0;
+        if (newY < 0) newY = 0;
+        if (newX + dragStartRect.w > rect.width) newX = rect.width - dragStartRect.w;
+        if (newY + dragStartRect.h > rect.height) newY = rect.height - dragStartRect.h;
+        
+        setCropRect({ ...dragStartRect, x: newX, y: newY });
+    } else if (dragStartRect) {
+        // Resize logic
+        let newX = dragStartRect.x;
+        let newY = dragStartRect.y;
+        let newW = dragStartRect.w;
+        let newH = dragStartRect.h;
+
+        if (dragMode === 'br') {
+            newW = Math.max(10, dragStartRect.w + dx);
+            newH = Math.max(10, dragStartRect.h + dy);
+        } else if (dragMode === 'bl') {
+            newX = Math.min(dragStartRect.x + dragStartRect.w - 10, dragStartRect.x + dx);
+            newW = dragStartRect.w - (newX - dragStartRect.x);
+            newH = Math.max(10, dragStartRect.h + dy);
+        } else if (dragMode === 'tr') {
+            newY = Math.min(dragStartRect.y + dragStartRect.h - 10, dragStartRect.y + dy);
+            newH = dragStartRect.h - (newY - dragStartRect.y);
+            newW = Math.max(10, dragStartRect.w + dx);
+        } else if (dragMode === 'tl') {
+            newX = Math.min(dragStartRect.x + dragStartRect.w - 10, dragStartRect.x + dx);
+            newW = dragStartRect.w - (newX - dragStartRect.x);
+            newY = Math.min(dragStartRect.y + dragStartRect.h - 10, dragStartRect.y + dy);
+            newH = dragStartRect.h - (newY - dragStartRect.y);
+        }
+        
+        // Clamp logic can be added here if needed, basic prevents negative dim
+        setCropRect({ x: newX, y: newY, w: newW, h: newH });
+    }
   };
 
   const handleCropMouseUp = () => {
     setIsDragging(false);
     setStartPos(null);
+    setDragStartRect(null);
+    setDragMode(null);
   };
 
   const confirmCrop = () => {
@@ -727,7 +902,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
               "props": { ... }
             },
             "answer": "正确答案",
-            "explanation": "详细解析（Markdown格式，支持分步骤说明）",
+            "explanation": "详细解析（Markdown格式，支持$$LaTeX$$公式）",
             "tags": ["标签1", "标签2"]
           }
         ]
@@ -852,7 +1027,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                  ref={fileInputRef}
                  type="file" 
                  accept="image/*" 
-                 capture="environment"
+                 // capture="environment" // REMOVED: Allow gallery selection on mobile
                  onChange={handleImageUpload} 
                  className="absolute inset-0 opacity-0 cursor-pointer"
                />
@@ -864,12 +1039,20 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
              </div>
           ) : !newImage ? (
              // CROP UI
-             <div className="bg-gray-900 rounded-xl overflow-hidden shadow-2xl relative select-none touch-none">
-               <div className="absolute top-4 left-4 z-20 text-white bg-black/50 px-3 py-1 rounded-full text-sm font-bold backdrop-blur-md">
-                 请框选题目区域
+             <div className="bg-gray-900 rounded-xl overflow-hidden shadow-2xl relative select-none touch-none flex flex-col">
+               {/* HEADER BAR with INFO */}
+               <div className="bg-black/80 text-white px-4 py-3 flex justify-between items-center backdrop-blur-md shrink-0 border-b border-gray-700 z-20">
+                 <div className="flex items-center gap-2">
+                    <Crop className="w-4 h-4 text-blue-400" />
+                    <span className="font-bold text-sm">请框选题目区域</span>
+                 </div>
+                 <div className="font-mono text-xs text-gray-400">
+                    {cropRect && cropRect.w > 0 ? `${Math.round(cropRect.w)} × ${Math.round(cropRect.h)} px` : '拖拽创建选区'}
+                 </div>
                </div>
+
                <div 
-                 className="relative max-h-[70vh] overflow-hidden flex items-center justify-center"
+                 className="relative max-h-[70vh] overflow-hidden flex items-center justify-center bg-black/50"
                  onMouseDown={handleCropMouseDown}
                  onMouseMove={handleCropMouseMove}
                  onMouseUp={handleCropMouseUp}
@@ -881,7 +1064,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                  <img 
                    ref={imageRef}
                    src={originalImageSrc} 
-                   className="max-w-full max-h-[70vh] object-contain pointer-events-none" // prevent img drag
+                   className="max-w-full max-h-[70vh] object-contain pointer-events-none select-none" // prevent img drag
                    alt="Original" 
                    onLoad={() => {
                      // Auto-init crop rect to center 80%? optional
@@ -893,7 +1076,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                  {/* Crop Box */}
                  {cropRect && cropRect.w > 0 && (
                     <div 
-                      className="absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.5)] pointer-events-none"
+                      className="absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.6)] group"
                       style={{
                         left: cropRect.x,
                         top: cropRect.y,
@@ -901,15 +1084,29 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                         height: cropRect.h
                       }}
                     >
-                      <div className="absolute -top-1 -left-1 w-3 h-3 border-t-2 border-l-2 border-white" />
-                      <div className="absolute -top-1 -right-1 w-3 h-3 border-t-2 border-r-2 border-white" />
-                      <div className="absolute -bottom-1 -left-1 w-3 h-3 border-b-2 border-l-2 border-white" />
-                      <div className="absolute -bottom-1 -right-1 w-3 h-3 border-b-2 border-r-2 border-white" />
+                      {/* Grid Lines */}
+                      <div className="absolute inset-0 pointer-events-none opacity-40">
+                         <div className="absolute top-1/3 left-0 right-0 h-px bg-white/50"></div>
+                         <div className="absolute top-2/3 left-0 right-0 h-px bg-white/50"></div>
+                         <div className="absolute left-1/3 top-0 bottom-0 w-px bg-white/50"></div>
+                         <div className="absolute left-2/3 top-0 bottom-0 w-px bg-white/50"></div>
+                      </div>
+
+                      {/* Handles */}
+                      <div className="absolute -top-1.5 -left-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-nw-resize z-20 hover:scale-125 transition-transform" />
+                      <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-ne-resize z-20 hover:scale-125 transition-transform" />
+                      <div className="absolute -bottom-1.5 -left-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-sw-resize z-20 hover:scale-125 transition-transform" />
+                      <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-se-resize z-20 hover:scale-125 transition-transform" />
+                      
+                      {/* Move Hint */}
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity pointer-events-none">
+                         <Move className="w-8 h-8 text-white drop-shadow-md" />
+                      </div>
                     </div>
                  )}
                </div>
                
-               <div className="p-4 bg-gray-800 flex justify-between items-center">
+               <div className="p-4 bg-gray-800 flex justify-between items-center shrink-0 border-t border-gray-700">
                   <button 
                     onClick={handleReset}
                     className="text-white hover:text-gray-300 font-bold px-4 py-2"
@@ -971,8 +1168,11 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                                      />
                                      {renderVisualComponent(data.visualComponent)}
                                      <div className="bg-green-50 p-4 rounded-lg border border-green-100 text-sm text-gray-700">
-                                        <div className="font-bold text-green-800 mb-1">Answer: {data.answer}</div>
-                                        <div>{renderMarkdown(data.explanation)}</div>
+                                        <div className="font-bold text-green-800 mb-1 flex items-center gap-2">
+                                          <span>Answer:</span>
+                                          <MarkdownRenderer content={data.answer} />
+                                        </div>
+                                        <div><MarkdownRenderer content={data.explanation} /></div>
                                      </div>
                                   </div>
                                </div>
@@ -1097,8 +1297,12 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
                  <div className="bg-green-50 p-5 rounded-xl border border-green-100">
                     <div className="font-bold text-green-800 mb-2 text-sm uppercase tracking-wide">参考答案</div>
-                    <div className="text-gray-900 font-medium mb-3">{currentVariation.answer}</div>
-                    <div className="text-sm text-gray-600">{renderMarkdown(currentVariation.explanation)}</div>
+                    <div className="text-gray-900 font-medium mb-3">
+                      <MarkdownRenderer content={currentVariation.answer} />
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      <MarkdownRenderer content={currentVariation.explanation} />
+                    </div>
                  </div>
               </div>
 
