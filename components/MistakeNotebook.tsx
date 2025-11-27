@@ -303,6 +303,20 @@ const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, 
   const [showAnswer, setShowAnswer] = useState(false);
   const [showFullImage, setShowFullImage] = useState(false);
 
+  const handleDelete = () => {
+    // 兼容性处理：如果id不存在，尝试获取_id (防止后端返回原始对象未映射)
+    const targetId = mistake.id || (mistake as any)._id;
+    if (!targetId) {
+      console.error("Mistake ID missing:", mistake);
+      alert("删除失败：无法获取题目ID");
+      return;
+    }
+    
+    if (window.confirm("确定要删除这道错题吗？删除后不可恢复。")) {
+      onDelete(targetId);
+    }
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden mb-6 transition-all hover:shadow-lg">
       <div className="bg-gray-50 px-4 py-3 flex justify-between items-center border-b border-gray-100">
@@ -313,7 +327,7 @@ const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, 
          </div>
          <div className="flex items-center gap-3">
             {isDue && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded font-bold animate-pulse">需复习</span>}
-            <button onClick={() => onDelete(mistake.id)} className="text-gray-400 hover:text-red-500 p-1 hover:bg-red-50 rounded">
+            <button onClick={handleDelete} className="text-gray-400 hover:text-red-500 p-1 hover:bg-red-50 rounded">
               <Trash2 className="w-5 h-5" />
             </button>
          </div>

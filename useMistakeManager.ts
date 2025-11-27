@@ -29,14 +29,11 @@ export function useMistakeManager() {
   };
 
   const addMistake = async (record: AddMistakePayload) => {
-    setIsLoading(true); // Optional: global loading or optimistic update
+    setIsLoading(true); // Sets global loading
     try {
-      const result = await api.addMistake(record);
-      if (Array.isArray(result)) {
-        setMistakes(prev => [...result, ...prev]);
-      } else {
-        setMistakes(prev => [result, ...prev]);
-      }
+      await api.addMistake(record);
+      // Fetch fresh data from backend to ensure UI is in sync with DB
+      await fetchMistakes();
     } catch (e: any) {
       console.error("Add Error:", e);
       // Handle quota error specifically if using Mock LocalStorage
@@ -45,8 +42,7 @@ export function useMistakeManager() {
       } else {
          setError("添加错题失败");
       }
-    } finally {
-      setIsLoading(false);
+      setIsLoading(false); // Ensure loading is turned off if error occurs
     }
   };
 

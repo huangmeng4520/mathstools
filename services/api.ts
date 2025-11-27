@@ -7,7 +7,6 @@ import { MistakeRecord, User, AuthResponse, AddMistakePayload } from '../types';
  */
 
 // --- CONFIGURATION ---
-// CHANGED: Revert to TRUE to use Mock API because the real backend is unreachable (Failed to fetch).
 const USE_MOCK_API = true; 
 const BASE_URL = 'http://129.204.35.20:4000';
 const STORAGE_KEY = 'math_master_mistakes_v2';
@@ -253,7 +252,12 @@ async function fetchWithAuth<T>(endpoint: string, options: RequestInit = {}): Pr
       throw new Error(`API Error: ${res.status} ${res.statusText}`);
     }
 
-    return res.json();
+    // Safely handle 204 No Content or empty bodies
+    if (res.status === 204) {
+      return {} as unknown as T;
+    }
+    const text = await res.text();
+    return text ? JSON.parse(text) : {};
   } catch (error) {
     console.error("Fetch Error:", error);
     throw error;
@@ -266,22 +270,24 @@ const RealApi: ApiService = {
     // Adapt backend response structure
     const mistakes = Array.isArray(response) ? response : (response.data || []);
     
-    return mistakes.map((mistake: any) => ({
-      id: mistake._id || mistake.id,
-      userId: mistake.userId,
-      htmlContent: mistake.content?.html || mistake.htmlContent,
-      visualComponent: mistake.content?.visualComponent || mistake.visualComponent,
-      imageData: mistake.originalImage?.url || mistake.imageData,
-      answer: mistake.answer,
-      explanation: mistake.explanation,
-      tags: mistake.tags || [],
-      status: mistake.status,
-      createdAt: new Date(mistake.createdAt).getTime(),
-      updatedAt: new Date(mistake.updatedAt).getTime(),
-      nextReviewAt: mistake.srs?.nextReviewAt ? new Date(mistake.srs.nextReviewAt).getTime() : Date.now(),
-      reviewCount: mistake.srs?.reviewCount || 0,
-      masteryLevel: mistake.srs?.masteryLevel || 'new'
-    }));
+    return mistakes
+      .filter((mistake: any) => mistake.status !== 'deleted') // Filter out soft-deleted items
+      .map((mistake: any) => ({
+        id: mistake._id || mistake.id,
+        userId: mistake.userId,
+        htmlContent: mistake.content?.html || mistake.htmlContent,
+        visualComponent: mistake.content?.visualComponent || mistake.visualComponent,
+        imageData: mistake.originalImage?.url || mistake.imageData,
+        answer: mistake.answer,
+        explanation: mistake.explanation,
+        tags: mistake.tags || [],
+        status: mistake.status,
+        createdAt: new Date(mistake.createdAt).getTime(),
+        updatedAt: new Date(mistake.updatedAt).getTime(),
+        nextReviewAt: mistake.srs?.nextReviewAt ? new Date(mistake.srs.nextReviewAt).getTime() : Date.now(),
+        reviewCount: mistake.srs?.reviewCount || 0,
+        masteryLevel: mistake.srs?.masteryLevel || 'new'
+      }));
   },
   
   addMistake: async (data) => {
