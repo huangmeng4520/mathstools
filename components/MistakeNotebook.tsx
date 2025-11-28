@@ -25,7 +25,13 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
-  Printer
+  Printer,
+  Edit,
+  Code,
+  Eye,
+  Bold,
+  Italic,
+  Eraser
 } from 'lucide-react';
 import { MistakeRecord, VisualComponentData, Question, AddMistakePayload } from '../types';
 import { ClockVisualizer } from './ClockVisualizer';
@@ -305,6 +311,195 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
   }
 };
 
+// --- HELPER: ContentEditable Component ---
+// This component manages the contentEditable div to prevent cursor jumping issues during React re-renders.
+const ContentEditable = React.forwardRef<HTMLDivElement, { html: string, onChange: (html: string) => void, className?: string }>(
+  ({ html, onChange, className }, ref) => {
+    const internalRef = useRef<HTMLDivElement>(null);
+    
+    // Allow parent to access ref
+    React.useImperativeHandle(ref, () => internalRef.current!);
+
+    // Only update innerHTML from prop when mounting. 
+    // Subsequent updates are handled by the user typing, or if the parent key changes (remount).
+    useEffect(() => {
+      if (internalRef.current && internalRef.current.innerHTML !== html) {
+        internalRef.current.innerHTML = html;
+      }
+    }, []); 
+
+    const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
+      onChange(e.currentTarget.innerHTML);
+    };
+
+    return (
+      <div
+        ref={internalRef}
+        className={className}
+        contentEditable
+        onInput={handleInput}
+        suppressContentEditableWarning={true}
+        style={{ minHeight: '120px', outline: 'none' }} 
+      />
+    );
+  }
+);
+ContentEditable.displayName = 'ContentEditable';
+
+// --- EDIT COMPONENT ---
+interface MistakeEditorProps {
+  data: {
+    html: string;
+    answer: string;
+    explanation: string;
+    tags: string[];
+    visualComponents?: VisualComponentData[];
+  };
+  onSave: (newData: any) => void;
+  onCancel: () => void;
+}
+
+const MistakeEditor: React.FC<MistakeEditorProps> = ({ data, onSave, onCancel }) => {
+  const [formData, setFormData] = useState({
+    html: data.html || '',
+    answer: data.answer || '',
+    explanation: data.explanation || '',
+    tags: (data.tags || []).join(', '),
+    visualComponentsJSON: JSON.stringify(data.visualComponents || [], null, 2)
+  });
+  const [editMode, setEditMode] = useState<'visual' | 'code'>('visual');
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  const handleSave = () => {
+    try {
+      const visualComponents = JSON.parse(formData.visualComponentsJSON);
+      onSave({
+        ...data,
+        html: formData.html,
+        answer: formData.answer,
+        explanation: formData.explanation,
+        tags: formData.tags.split(/[,，]/).map(t => t.trim()).filter(Boolean),
+        visualComponents
+      });
+    } catch (e) {
+      alert("可视化组件 JSON 格式错误，请检查");
+    }
+  };
+
+  const execCmd = (cmd: string, arg?: string) => {
+    document.execCommand(cmd, false, arg);
+    // Force sync state after command
+    if (editorRef.current) {
+        setFormData(prev => ({ ...prev, html: editorRef.current!.innerHTML }));
+    }
+  };
+
+  return (
+    <div className="space-y-4 bg-white p-4 rounded-lg animate-in fade-in duration-200 border border-purple-100 shadow-sm">
+      {/* HTML EDITOR SECTION */}
+      <div>
+         <div className="flex justify-between items-center mb-2">
+            <label className="text-sm font-bold text-gray-700">题目内容</label>
+            <div className="flex bg-gray-100 p-1 rounded-lg">
+               <button 
+                 onClick={() => setEditMode('visual')}
+                 className={`px-3 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${editMode === 'visual' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+               >
+                  <Eye className="w-3 h-3" /> 可视化
+               </button>
+               <button 
+                 onClick={() => setEditMode('code')}
+                 className={`px-3 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${editMode === 'code' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+               >
+                  <Code className="w-3 h-3" /> 源码
+               </button>
+            </div>
+         </div>
+
+         {editMode === 'visual' ? (
+            <div className="border rounded-lg overflow-hidden border-gray-300 focus-within:ring-2 focus-within:ring-purple-500 transition-shadow">
+               {/* TOOLBAR */}
+               <div className="bg-gray-50 border-b border-gray-200 p-2 flex gap-1">
+                  <button onClick={() => execCmd('bold')} className="p-1.5 hover:bg-gray-200 rounded text-gray-700" title="加粗"><Bold className="w-4 h-4" /></button>
+                  <button onClick={() => execCmd('italic')} className="p-1.5 hover:bg-gray-200 rounded text-gray-700" title="斜体"><Italic className="w-4 h-4" /></button>
+                  <div className="w-px bg-gray-300 mx-1"></div>
+                  <button onClick={() => execCmd('foreColor', '#dc2626')} className="p-1.5 hover:bg-gray-200 rounded text-red-600 font-bold" title="标红">A</button>
+                  <button onClick={() => execCmd('removeFormat')} className="p-1.5 hover:bg-gray-200 rounded text-gray-700" title="清除格式"><Eraser className="w-4 h-4" /></button>
+               </div>
+               {/* Use key to force remount when switching back to visual to ensure html prop sync */}
+               <ContentEditable 
+                  key="visual-editor"
+                  ref={editorRef}
+                  html={formData.html} 
+                  onChange={(html) => setFormData({...formData, html})}
+                  className="p-4 min-h-[160px] max-h-[400px] overflow-y-auto prose prose-lg max-w-none outline-none text-gray-900 bg-white"
+               />
+            </div>
+         ) : (
+            <textarea
+              value={formData.html}
+              onChange={e => setFormData({...formData, html: e.target.value})}
+              className="w-full px-3 py-2 border rounded-lg font-mono text-xs h-48 focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 text-gray-800"
+              placeholder="<div>...</div>"
+            />
+         )}
+         <p className="text-xs text-gray-400 mt-1">
+            {editMode === 'visual' ? '可以直接修改文字。如需调整复杂布局(如竖式对齐)，建议切换到源码模式。' : '支持 HTML Tailwind 类名。'}
+         </p>
+      </div>
+
+       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-bold text-gray-700 mb-1">答案</label>
+          <input
+            type="text"
+            value={formData.answer}
+            onChange={e => setFormData({...formData, answer: e.target.value})}
+            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-bold text-gray-700 mb-1">标签</label>
+          <input
+            type="text"
+            value={formData.tags}
+            onChange={e => setFormData({...formData, tags: e.target.value})}
+            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+          />
+        </div>
+       </div>
+
+       <div>
+        <label className="block text-sm font-bold text-gray-700 mb-1">解析 (Markdown)</label>
+        <textarea
+          value={formData.explanation}
+          onChange={e => setFormData({...formData, explanation: e.target.value})}
+          className="w-full px-3 py-2 border rounded-lg h-24 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+        />
+      </div>
+      <div>
+        <details className="group">
+            <summary className="cursor-pointer text-xs font-bold text-gray-500 hover:text-purple-600 transition-colors flex items-center gap-1 select-none">
+                <Code className="w-3 h-3" /> 高级：可视化组件配置 (JSON)
+            </summary>
+            <textarea
+            value={formData.visualComponentsJSON}
+            onChange={e => setFormData({...formData, visualComponentsJSON: e.target.value})}
+            className="w-full px-3 py-2 border rounded-lg font-mono text-xs h-32 mt-2 bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+        </details>
+      </div>
+      <div className="flex justify-end gap-2 pt-2 border-t border-gray-100 mt-4">
+        <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-bold transition-colors">取消</button>
+        <button onClick={handleSave} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-bold transition-colors flex items-center gap-2 shadow-md shadow-purple-200">
+            <Save className="w-4 h-4" />
+            保存修改
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // --- COMPONENTS ---
 
 interface MistakeCardProps {
@@ -501,6 +696,10 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   const [newImage, setNewImage] = useState<string | null>(null);
   const [analyzedData, setAnalyzedData] = useState<Array<{html: string, answer: string, explanation: string, tags: string[], visualComponents?: VisualComponentData[]}>>([]);
   const [retryPrompt, setRetryPrompt] = useState('');
+  
+  // Edit State
+  const [editingAnalysisIndex, setEditingAnalysisIndex] = useState<number | null>(null);
+  const [isEditingVariation, setIsEditingVariation] = useState(false);
   
   // Variation preview state
   const [showVariationPreview, setShowVariationPreview] = useState(false);
@@ -748,6 +947,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
     setAnalyzedData([]);
     setOriginalImageSrc(null);
     setFile(null);
+    setEditingAnalysisIndex(null); // Reset editing state
   };
   
   const setFile = (f: any) => { if(fileInputRef.current) fileInputRef.current.value = '' };
@@ -1026,6 +1226,18 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
     setView('list');
   };
 
+  const handleSaveAnalysisUpdate = (index: number, newData: any) => {
+    const updated = [...analyzedData];
+    updated[index] = newData;
+    setAnalyzedData(updated);
+    setEditingAnalysisIndex(null);
+  };
+
+  const handleSaveVariationUpdate = (newData: any) => {
+    setCurrentVariation(newData);
+    setIsEditingVariation(false);
+  };
+
   // --- PRINTING ---
   const handlePrint = () => {
     window.print();
@@ -1236,25 +1448,43 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                            <div className="space-y-4">
                               {analyzedData.map((data, idx) => (
                                  <div key={idx} className="bg-white rounded-xl shadow-lg border border-purple-100 overflow-hidden">
-                                    <div className="bg-purple-50 px-4 py-2 border-b border-purple-100 flex justify-between">
+                                    <div className="bg-purple-50 px-4 py-2 border-b border-purple-100 flex justify-between items-center">
                                        <span className="font-bold text-purple-700 text-sm">识别结果 {analyzedData.length > 1 ? `#${idx+1}` : ''}</span>
+                                       {editingAnalysisIndex !== idx && (
+                                          <button 
+                                            onClick={() => setEditingAnalysisIndex(idx)}
+                                            className="text-purple-600 hover:text-purple-800 hover:bg-purple-100 p-1.5 rounded transition-colors"
+                                            title="手动编辑"
+                                          >
+                                            <Edit className="w-4 h-4" />
+                                          </button>
+                                       )}
                                     </div>
-                                    <div className="p-6">
-                                       <div 
-                                         className="prose max-w-none text-gray-900 mb-4 text-xl"
-                                         dangerouslySetInnerHTML={{__html: data.html}} 
-                                       />
-                                       {data.visualComponents && data.visualComponents.map((vc, i) => (
-                                          <div key={i}>{renderVisualComponent(vc)}</div>
-                                       ))}
-                                       <div className="bg-green-50 p-4 rounded-lg border border-green-100 text-sm text-gray-700">
-                                          <div className="font-bold text-green-800 mb-1 flex items-center gap-2">
-                                            <span>Answer:</span>
-                                            <MarkdownRenderer content={data.answer} />
-                                          </div>
-                                          <div><MarkdownRenderer content={data.explanation} /></div>
-                                       </div>
-                                    </div>
+                                    
+                                    {editingAnalysisIndex === idx ? (
+                                        <MistakeEditor 
+                                          data={data}
+                                          onSave={(updatedData) => handleSaveAnalysisUpdate(idx, updatedData)}
+                                          onCancel={() => setEditingAnalysisIndex(null)}
+                                        />
+                                    ) : (
+                                        <div className="p-6">
+                                           <div 
+                                             className="prose max-w-none text-gray-900 mb-4 text-xl"
+                                             dangerouslySetInnerHTML={{__html: data.html}} 
+                                           />
+                                           {data.visualComponents && data.visualComponents.map((vc, i) => (
+                                              <div key={i}>{renderVisualComponent(vc)}</div>
+                                           ))}
+                                           <div className="bg-green-50 p-4 rounded-lg border border-green-100 text-sm text-gray-700">
+                                              <div className="font-bold text-green-800 mb-1 flex items-center gap-2">
+                                                <span>Answer:</span>
+                                                <MarkdownRenderer content={data.answer} />
+                                              </div>
+                                              <div><MarkdownRenderer content={data.explanation} /></div>
+                                           </div>
+                                        </div>
+                                    )}
                                  </div>
                               ))}
                               
@@ -1384,53 +1614,72 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                       <Wand2 className="w-5 h-5" />
                       AI 生成变式练习
                    </h3>
-                   <button onClick={() => setShowVariationPreview(false)} className="hover:bg-white/20 p-1 rounded-full transition-colors">
-                      <XCircle className="w-6 h-6" />
-                   </button>
+                   <div className="flex items-center gap-2">
+                     {!isEditingVariation && (
+                       <button onClick={() => setIsEditingVariation(true)} className="hover:bg-white/20 p-1.5 rounded-full transition-colors" title="编辑题目">
+                         <Edit className="w-5 h-5" />
+                       </button>
+                     )}
+                     <button onClick={() => setShowVariationPreview(false)} className="hover:bg-white/20 p-1 rounded-full transition-colors">
+                        <XCircle className="w-6 h-6" />
+                     </button>
+                   </div>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
-                   <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
-                      <div className="flex gap-2 mb-4">
-                         {currentVariation.tags.map(t => (
-                            <span key={t} className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded border border-purple-100">{t}</span>
-                         ))}
-                      </div>
-                      <div 
-                         className="prose max-w-none text-gray-900 text-xl"
-                         dangerouslySetInnerHTML={{__html: currentVariation.html}} 
+                   {isEditingVariation ? (
+                      <MistakeEditor 
+                        data={currentVariation}
+                        onSave={handleSaveVariationUpdate}
+                        onCancel={() => setIsEditingVariation(false)}
                       />
-                      {currentVariation.visualComponents && currentVariation.visualComponents.map((vc, i) => (
-                         <div key={i}>{renderVisualComponent(vc)}</div>
-                      ))}
-                   </div>
+                   ) : (
+                     <>
+                       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+                          <div className="flex gap-2 mb-4">
+                             {currentVariation.tags.map(t => (
+                                <span key={t} className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded border border-purple-100">{t}</span>
+                             ))}
+                          </div>
+                          <div 
+                             className="prose max-w-none text-gray-900 text-xl"
+                             dangerouslySetInnerHTML={{__html: currentVariation.html}} 
+                          />
+                          {currentVariation.visualComponents && currentVariation.visualComponents.map((vc, i) => (
+                             <div key={i}>{renderVisualComponent(vc)}</div>
+                          ))}
+                       </div>
 
-                   <div className="bg-green-50 p-5 rounded-xl border border-green-100">
-                      <div className="font-bold text-green-800 mb-2 text-sm uppercase tracking-wide">参考答案</div>
-                      <div className="text-gray-900 font-medium mb-3">
-                        <MarkdownRenderer content={currentVariation.answer} />
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        <MarkdownRenderer content={currentVariation.explanation} />
-                      </div>
-                   </div>
+                       <div className="bg-green-50 p-5 rounded-xl border border-green-100">
+                          <div className="font-bold text-green-800 mb-2 text-sm uppercase tracking-wide">参考答案</div>
+                          <div className="text-gray-900 font-medium mb-3">
+                            <MarkdownRenderer content={currentVariation.answer} />
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            <MarkdownRenderer content={currentVariation.explanation} />
+                          </div>
+                       </div>
+                     </>
+                   )}
                 </div>
 
-                <div className="p-4 bg-white border-t border-gray-200 flex justify-end gap-3 shrink-0">
-                   <button 
-                     onClick={() => setShowVariationPreview(false)}
-                     className="px-5 py-2.5 text-gray-600 font-bold hover:bg-gray-100 rounded-lg transition-colors"
-                   >
-                     取消
-                   </button>
-                   <button 
-                     onClick={handleSaveVariation}
-                     className="px-6 py-2.5 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 shadow-lg shadow-purple-200 transition-colors flex items-center gap-2"
-                   >
-                     <Save className="w-4 h-4" />
-                     保存到错题本
-                   </button>
-                </div>
+                {!isEditingVariation && (
+                  <div className="p-4 bg-white border-t border-gray-200 flex justify-end gap-3 shrink-0">
+                     <button 
+                       onClick={() => setShowVariationPreview(false)}
+                       className="px-5 py-2.5 text-gray-600 font-bold hover:bg-gray-100 rounded-lg transition-colors"
+                     >
+                       取消
+                     </button>
+                     <button 
+                       onClick={handleSaveVariation}
+                       className="px-6 py-2.5 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 shadow-lg shadow-purple-200 transition-colors flex items-center gap-2"
+                     >
+                       <Save className="w-4 h-4" />
+                       保存到错题本
+                     </button>
+                  </div>
+                )}
              </div>
           </div>
         )}
