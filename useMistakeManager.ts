@@ -41,6 +41,7 @@ export function useMistakeManager() {
 
   const getReviewQueue = async (): Promise<MistakeRecord[]> => {
       try {
+          if (!api.getReviewQueue) return [];
           return await api.getReviewQueue();
       } catch (e: any) {
           const msg = e instanceof Error ? e.message : String(e);

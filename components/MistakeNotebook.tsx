@@ -840,6 +840,13 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
   // --- REVIEW QUIZ GENERATION ---
   const handleStartReview = async () => {
+    // Safety check to prevent crash if prop is missing
+    if (typeof getReviewQueue !== 'function') {
+        console.error("getReviewQueue is not defined or is not a function.");
+        alert("复习功能暂不可用，请刷新页面重试。");
+        return;
+    }
+
     setIsProcessing(true);
     try {
       const dueMistakes = await getReviewQueue();
@@ -1078,10 +1085,12 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
            processFile = new File([buffer], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
 
        } else if (msg.includes("ERR_LIBHEIF")) {
-           alert("抱歉，当前浏览器环境不支持此 HEIC 图片格式。请尝试在相册中将其保存为 JPG 后上传。");
-           setIsConverting(false);
-           if (fileInputRef.current) fileInputRef.current.value = '';
-           return;
+           // Fallback for browsers that can natively display HEIC or if conversion fails
+           console.warn("HEIC conversion failed (ERR_LIBHEIF), falling back to original file.");
+           // We will try to use the original file. 
+           // If the browser (like Safari) supports it, it will render.
+           // If not, the onError handler on the img tag will catch it.
+           processFile = file;
        } else {
            alert(`图片格式转换失败: ${msg}。请尝试使用 JPG 或 PNG 格式。`);
            setIsConverting(false);
@@ -1098,6 +1107,10 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
       setCropRect(null);
       setRetryPrompt('');
       setIsConverting(false);
+    };
+    reader.onerror = () => {
+        alert("无法读取图片文件");
+        setIsConverting(false);
     };
     reader.readAsDataURL(processFile);
     if (fileInputRef.current) fileInputRef.current.value = '';
