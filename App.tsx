@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { QUESTIONS } from './constants';
 import { QuizState, Question, ReviewResult, User } from './types';
@@ -18,7 +19,10 @@ import {
   Calculator,
   Trophy,
   Loader2,
-  LogOut
+  LogOut,
+  HelpCircle,
+  Check,
+  X
 } from 'lucide-react';
 
 export default function App() {
@@ -201,121 +205,185 @@ export default function App() {
     </div>
   );
 
-  const renderGameScreen = () => (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      <div className="bg-white shadow-sm sticky top-0 z-10">
-        <div className="max-w-3xl mx-auto px-4 py-4">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-sm font-bold text-gray-500 uppercase tracking-wide">
-              {currentQuestion.category}
-            </span>
-            <span className="text-sm font-bold text-blue-600">
-              第 {currentQIndex + 1} / {activeQuestions.length} 题
-            </span>
+  const renderGameScreen = () => {
+    // Determine layout class based on type
+    const isJudgment = currentQuestion.questionType === 'judgment';
+    const isSelection = currentQuestion.questionType === 'selection';
+    
+    // Grid class for options
+    let optionsGridClass = "space-y-4"; // Default vertical list (Completion)
+    if (isJudgment) optionsGridClass = "grid grid-cols-2 gap-4 h-32";
+    if (isSelection) optionsGridClass = "grid grid-cols-2 gap-4";
+
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col">
+        {/* PROGRESS HEADER */}
+        <div className="bg-white shadow-sm sticky top-0 z-10">
+          <div className="max-w-3xl mx-auto px-4 py-4">
+            <div className="flex justify-between items-center mb-2">
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-bold px-2 py-0.5 rounded uppercase tracking-wide 
+                  ${isJudgment ? 'bg-orange-100 text-orange-700' : 
+                    isSelection ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                  {currentQuestion.questionType === 'judgment' ? '判断题' : 
+                   currentQuestion.questionType === 'selection' ? '选择题' : '填空/计算'}
+                </span>
+                <span className="text-sm font-bold text-gray-500 max-w-[150px] truncate">
+                  {currentQuestion.category}
+                </span>
+              </div>
+              <span className="text-sm font-bold text-blue-600">
+                第 {currentQIndex + 1} / {activeQuestions.length} 题
+              </span>
+            </div>
+            <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-blue-500 transition-all duration-500 ease-out"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
           </div>
-          <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-blue-500 transition-all duration-500 ease-out"
-              style={{ width: `${progressPercent}%` }}
-            />
+        </div>
+
+        {/* MAIN QUESTION AREA */}
+        <main className="flex-1 max-w-3xl w-full mx-auto p-4 md:p-6 pb-40 overflow-visible flex flex-col">
+          {/* Question Card */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6 flex-1 flex flex-col items-center justify-center min-h-[200px]">
+             {currentQuestion.title && (
+               <h2 className="text-lg font-bold text-gray-800 mb-4 text-center w-full border-b border-gray-50 pb-2">
+                 {currentQuestion.title}
+               </h2>
+             )}
+             <div className="w-full">
+               {currentQuestion.content}
+             </div>
           </div>
-        </div>
-      </div>
 
-      <main className="flex-1 max-w-3xl w-full mx-auto p-4 md:p-6 pb-64 overflow-visible">
-        <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-6 text-center">
-          {currentQuestion.title}
-        </h2>
+          {/* Options Area - Visually Separated */}
+          <div className="animate-in slide-in-from-bottom-4 duration-300">
+             <div className={optionsGridClass}>
+                {currentQuestion.options.map((opt) => {
+                  let stateClass = "border-gray-200 hover:border-blue-400 hover:bg-blue-50 bg-white";
+                  
+                  // Specific styling for Judgment
+                  if (isJudgment) {
+                      if (opt.id.includes('true')) stateClass += " bg-green-50 border-green-200 hover:bg-green-100";
+                      if (opt.id.includes('false')) stateClass += " bg-red-50 border-red-200 hover:bg-red-100";
+                  }
 
-        <div className="mb-8 flex justify-center">
-          {currentQuestion.content}
-        </div>
+                  if (selectedOption === opt.id) {
+                    stateClass = "border-blue-500 bg-blue-100 ring-2 ring-blue-200";
+                    if (isCorrect !== null) {
+                      if (opt.id === currentQuestion.correctId) {
+                        stateClass = "border-green-500 bg-green-100 ring-2 ring-green-200";
+                      } else {
+                        stateClass = "border-red-500 bg-red-100 ring-2 ring-red-200";
+                      }
+                    }
+                  } else if (isCorrect !== null && opt.id === currentQuestion.correctId && selectedOption) {
+                    // Show correct answer if wrong one picked
+                    stateClass = "border-green-500 bg-green-50 border-dashed";
+                  }
 
-        <div className="space-y-6 overflow-visible mb-8">
-          {currentQuestion.options.map((opt) => {
-            let stateClass = "border-gray-200 hover:border-blue-400 hover:bg-blue-50";
-            
-            if (selectedOption === opt.id) {
-              stateClass = "border-blue-500 bg-blue-100 ring-2 ring-blue-200";
-              if (isCorrect !== null) {
-                if (opt.id === currentQuestion.correctId) {
-                  stateClass = "border-green-500 bg-green-100 ring-2 ring-green-200";
-                } else {
-                  stateClass = "border-red-500 bg-red-100 ring-2 ring-red-200";
-                }
-              }
-            } else if (isCorrect !== null && opt.id === currentQuestion.correctId && selectedOption) {
-               // Also show correct answer if user picked wrong
-               stateClass = "border-green-500 bg-green-50 border-dashed";
-            }
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => handleOptionSelect(opt.id)}
+                      disabled={isCorrect !== null}
+                      className={`
+                        relative w-full rounded-xl border-2 transition-all duration-200 flex flex-col items-center justify-center group overflow-hidden shadow-sm active:scale-[0.98]
+                        ${stateClass}
+                        ${isJudgment ? 'h-full text-2xl' : 'min-h-[70px] p-4'}
+                      `}
+                    >
+                      {/* Content inside button */}
+                      {isJudgment ? (
+                         <div className="flex flex-col items-center gap-2">
+                            {opt.text === '正确' ? <CheckCircle2 className="w-8 h-8 text-green-600" /> : <XCircle className="w-8 h-8 text-red-600" />}
+                            <span className="font-bold">{opt.text}</span>
+                         </div>
+                      ) : (
+                         <div className="flex items-center w-full">
+                            {/* Letter Badge for Selection */}
+                            {isSelection && (
+                               <span className="mr-3 w-8 h-8 rounded-full bg-gray-100 text-gray-600 font-bold flex items-center justify-center shrink-0 group-hover:bg-blue-200 group-hover:text-blue-800 transition-colors">
+                                  {opt.id}
+                               </span>
+                            )}
+                            <span className={`font-medium text-gray-800 break-words w-full text-left ${isSelection ? 'text-lg' : ''}`}>
+                               {opt.text}
+                            </span>
+                         </div>
+                      )}
 
-            return (
-              <button
-                key={opt.id}
-                onClick={() => handleOptionSelect(opt.id)}
-                disabled={isCorrect !== null}
-                className={`w-full p-6 text-left rounded-xl border-2 transition-all duration-200 flex flex-col items-start justify-start group ${stateClass} overflow-visible`}
-                style={{ minHeight: '80px' }}
-              >
-                <span className="font-medium text-gray-800 break-words w-full">{opt.text}</span>
-                {selectedOption === opt.id && isCorrect === null && (
-                   <div className="mt-2 w-5 h-5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
-                )}
-                {isCorrect !== null && opt.id === currentQuestion.correctId && (
-                   <div className="mt-2 w-6 h-6 text-green-600">
-                     <CheckCircle2 className="w-full h-full" />
-                   </div>
-                )}
-                 {isCorrect !== null && selectedOption === opt.id && opt.id !== currentQuestion.correctId && (
-                   <div className="mt-2 w-6 h-6 text-red-600">
-                     <XCircle className="w-full h-full" />
-                   </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </main>
+                      {/* Loading/Status Icons (Absolute) */}
+                      {selectedOption === opt.id && isCorrect === null && (
+                        <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                           <div className="w-5 h-5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                        </div>
+                      )}
+                      {isCorrect !== null && opt.id === currentQuestion.correctId && !isJudgment && (
+                        <div className="absolute right-4 top-1/2 -translate-y-1/2 text-green-600">
+                          <CheckCircle2 className="w-6 h-6" />
+                        </div>
+                      )}
+                      {isCorrect !== null && selectedOption === opt.id && opt.id !== currentQuestion.correctId && !isJudgment && (
+                        <div className="absolute right-4 top-1/2 -translate-y-1/2 text-red-600">
+                          <XCircle className="w-6 h-6" />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+             </div>
+          </div>
+        </main>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-        <div className="max-w-3xl mx-auto flex flex-col md:flex-row gap-4 items-center justify-between">
-           <div className="flex-1 w-full">
-             {isCorrect === null ? (
-               <div className="text-gray-500 text-sm flex items-center gap-2">
-                 <Lightbulb className="w-4 h-4 text-yellow-500" />
-                 提示: {currentQuestion.hint || "仔细思考，相信你可以！"}
-               </div>
-             ) : (
-                <div className={`p-3 rounded-lg text-sm ${isCorrect ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
-                  <p className="font-bold mb-1">{isCorrect ? '回答正确！🎉' : '再想一想...'}</p>
-                  <div className="max-h-20 overflow-auto">{currentQuestion.explanation}</div>
+        {/* FOOTER ACTIONS */}
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-20">
+          <div className="max-w-3xl mx-auto flex flex-col md:flex-row gap-4 items-center justify-between">
+            <div className="flex-1 w-full">
+              {isCorrect === null ? (
+                <div className="text-gray-500 text-sm flex items-center gap-2">
+                  <Lightbulb className="w-4 h-4 text-yellow-500" />
+                  提示: {currentQuestion.hint || "仔细思考，相信你可以！"}
                 </div>
-             )}
-           </div>
+              ) : (
+                  <div className={`p-3 rounded-lg text-sm ${isCorrect ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'} animate-in slide-in-from-bottom-2`}>
+                    <p className="font-bold mb-1 flex items-center gap-2">
+                       {isCorrect ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                       {isCorrect ? '回答正确！🎉' : '再想一想...'}
+                    </p>
+                    <div className="max-h-24 overflow-auto custom-scrollbar">{currentQuestion.explanation}</div>
+                  </div>
+              )}
+            </div>
 
-           <div className="w-full md:w-auto shrink-0">
-             {isCorrect === null ? (
-               <button 
-                 onClick={handleSubmit}
-                 disabled={!selectedOption}
-                 className="w-full md:w-48 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white font-bold rounded-xl transition-colors shadow-md"
-               >
-                 提交答案
-               </button>
-             ) : (
+            <div className="w-full md:w-auto shrink-0">
+              {isCorrect === null ? (
                 <button 
-                 onClick={handleNext}
-                 className="w-full md:w-48 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors shadow-md flex items-center justify-center gap-2"
-               >
-                 {currentQIndex < activeQuestions.length - 1 ? '下一题' : '查看结果'}
-                 <ChevronRight className="w-5 h-5" />
-               </button>
-             )}
-           </div>
+                  onClick={handleSubmit}
+                  disabled={!selectedOption}
+                  className="w-full md:w-48 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 text-white font-bold rounded-xl transition-colors shadow-md flex items-center justify-center gap-2"
+                >
+                  <CheckCircle2 className="w-5 h-5" />
+                  提交答案
+                </button>
+              ) : (
+                  <button 
+                  onClick={handleNext}
+                  className="w-full md:w-48 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-colors shadow-md flex items-center justify-center gap-2"
+                >
+                  {currentQIndex < activeQuestions.length - 1 ? '下一题' : '查看结果'}
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // --- Main Render ---
   if (authLoading) {

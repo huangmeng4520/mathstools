@@ -34,7 +34,7 @@ import {
   List,
   Heading1
 } from 'lucide-react';
-import { MistakeRecord, VisualComponentData, Question, AddMistakePayload } from '../types';
+import { MistakeRecord, VisualComponentData, Question, AddMistakePayload, Option } from '../types';
 import { ClockVisualizer } from './ClockVisualizer';
 import { NumberLine } from './NumberLine';
 import { FractionVisualizer } from './FractionVisualizer';
@@ -868,58 +868,88 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
       for (const mistake of dueMistakes) {
         // 移除答案中的HTML标签，只保留纯文本
         const cleanAnswer = mistake.answer.replace(/<[^>]*>/g, '').trim();
+        const upperAnswer = cleanAnswer.toUpperCase();
         
-        // 生成更合理的错误选项，基于正确答案创建变体
-        const generateDistractors = (correct: string) => {
-          const distractors: string[] = [];
-          
-          // 如果答案是数字，生成相近的数字作为干扰项
-          const num = parseInt(correct);
-          if (!isNaN(num)) {
-            // 生成三个不同的干扰项
-            const variations = [num - 1, num + 1, num - 10, num + 10, num - 100, num + 100];
-            const filtered = variations.filter(v => v !== num && !distractors.includes(v.toString()));
-            for (let i = 0; i < 3 && i < filtered.length; i++) {
-              distractors.push(filtered[i].toString());
-            }
-          }
-          
-          // 如果干扰项不足，使用通用干扰项
-          while (distractors.length < 3) {
-            const genericDistractors = [
-              '这是一个干扰选项',
-              '这个选项不正确',
-              '请再仔细思考',
-              '错误的答案',
-              '不符合题意的选项'
-            ];
-            const randomDistractor = genericDistractors[Math.floor(Math.random() * genericDistractors.length)];
-            if (!distractors.includes(randomDistractor)) {
-              distractors.push(randomDistractor);
-            }
-          }
-          
-          return distractors;
-        };
+        // --- 1. DETECT QUESTION TYPE ---
+        let qType: 'judgment' | 'selection' | 'completion' = 'completion';
         
-        const distractors = generateDistractors(cleanAnswer);
+        // Judgment (True/False) Detection
+        const isJudgment = 
+            ["对", "错", "√", "×", "TRUE", "FALSE"].includes(upperAnswer) ||
+            mistake.tags.some(t => t.includes("判断"));
+
+        // Selection (Multiple Choice) Detection (Single letter A-D)
+        const isSelection = /^[A-D]$/i.test(cleanAnswer);
+
+        if (isJudgment) qType = 'judgment';
+        else if (isSelection) qType = 'selection';
         
-        // Create options with clean text
-        const options = [
-            { id: 'correct', text: cleanAnswer },
-            { id: 'wrong_1', text: distractors[0] },
-            { id: 'wrong_2', text: distractors[1] },
-            { id: 'wrong_3', text: distractors[2] }
-        ];
-        
-        // Shuffle options
-        const shuffled = options.sort(() => Math.random() - 0.5);
+        // --- 2. GENERATE OPTIONS BASED ON TYPE ---
+        let options: Option[] = [];
+        let correctId = 'correct';
+
+        if (qType === 'judgment') {
+             // Logic for Judgment
+             const isTrue = ["对", "√", "TRUE", "T", "A"].includes(upperAnswer) || (cleanAnswer === "正确");
+             
+             // Fixed Options for Judgment
+             options = [
+                 { id: 'opt_true', text: '正确' },
+                 { id: 'opt_false', text: '错误' }
+             ];
+             correctId = isTrue ? 'opt_true' : 'opt_false';
+
+        } else if (qType === 'selection') {
+             // Logic for Selection (Assuming content already has choices)
+             options = [
+                 { id: 'A', text: 'A' },
+                 { id: 'B', text: 'B' },
+                 { id: 'C', text: 'C' },
+                 { id: 'D', text: 'D' }
+             ];
+             correctId = upperAnswer; // Correct ID is 'A', 'B', etc.
+
+        } else {
+             // Logic for Completion (Convert to Multiple Choice with Distractors)
+             const generateDistractors = (correct: string) => {
+                const distractors: string[] = [];
+                const num = parseInt(correct);
+                if (!isNaN(num)) {
+                  // Numeric distractors
+                  const variations = [num - 1, num + 1, num - 10, num + 10, num * 10, Math.floor(num/2)];
+                  const filtered = variations.filter(v => v !== num && !distractors.includes(v.toString()));
+                  for (let i = 0; i < 3 && i < filtered.length; i++) {
+                    distractors.push(filtered[i].toString());
+                  }
+                }
+                // Fallback text distractors
+                while (distractors.length < 3) {
+                  const generic = ['未知', '无法计算', '以上都不对', '需要更多信息'];
+                  const rand = generic[Math.floor(Math.random() * generic.length)];
+                  if (!distractors.includes(rand)) distractors.push(rand);
+                }
+                return distractors;
+             };
+             
+             const distractors = generateDistractors(cleanAnswer);
+             
+             const rawOptions = [
+                 { id: 'correct', text: cleanAnswer },
+                 { id: 'wrong_1', text: distractors[0] },
+                 { id: 'wrong_2', text: distractors[1] },
+                 { id: 'wrong_3', text: distractors[2] }
+             ];
+             // Shuffle for completion type
+             options = rawOptions.sort(() => Math.random() - 0.5);
+             correctId = 'correct';
+        }
 
         generatedQuestions.push({
             id: mistake.id,
             mistakeId: mistake.id,
-            category: '复习挑战',
+            category: qType === 'judgment' ? '判断题' : (qType === 'selection' ? '选择题' : '填空/计算'),
             title: mistake.tags.join(' / '),
+            questionType: qType, // PASS TYPE TO UI
             content: (
                 <div className="flex flex-col items-center justify-center p-6 text-gray-900">
                   <div 
@@ -935,8 +965,8 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                   )}
                 </div>
             ),
-            options: shuffled,
-            correctId: 'correct',
+            options: options,
+            correctId: correctId,
             explanation: <MarkdownRenderer content={mistake.explanation} />,
             hint: '回想一下之前整理错题时的思路'
         });

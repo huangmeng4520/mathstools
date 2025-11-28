@@ -12,6 +12,7 @@ export interface Question {
   explanation: ReactNode;
   hint?: string;
   mistakeId?: string; // Links back to the original mistake for tracking
+  questionType?: 'judgment' | 'selection' | 'completion'; // New field for UI adaptation
 }
 
 export interface Option {
