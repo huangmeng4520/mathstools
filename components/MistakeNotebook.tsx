@@ -31,7 +31,9 @@ import {
   Eye,
   Bold,
   Italic,
-  Eraser
+  Eraser,
+  List,
+  Heading1
 } from 'lucide-react';
 import { MistakeRecord, VisualComponentData, Question, AddMistakePayload } from '../types';
 import { ClockVisualizer } from './ClockVisualizer';
@@ -115,6 +117,38 @@ const processContent = (text: string): string => {
        return renderMath(latex, false);
     }
   });
+
+  return processed;
+};
+
+// Helper to convert simple Markdown to HTML for the Visual Editor (Without rendering Math)
+// This allows the visual editor to show structure while keeping Math as editable text $$...$$
+const simpleMarkdownToHtmlForEditor = (md: string): string => {
+  if (!md) return '';
+  // Check if it already looks like HTML (has tags)
+  if (/<[a-z][\s\S]*>/i.test(md)) return md;
+
+  let processed = md;
+  // Escape HTML characters to prevent XSS if we were real, but here we want to allow user HTML.
+  // We assume trusted content or acceptable risk for personal notebook.
+
+  // 1. Bold **text** -> <b>text</b>
+  processed = processed.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  
+  // 2. Italic *text* -> <i>text</i>
+  processed = processed.replace(/\*(.+?)\*/g, '<i>$1</i>');
+
+  // 3. Headers
+  processed = processed.replace(/^### (.*$)/gm, '<h3>$1</h3>');
+  processed = processed.replace(/^## (.*$)/gm, '<h2>$1</h2>');
+  processed = processed.replace(/^# (.*$)/gm, '<h1>$1</h1>');
+
+  // 4. Lists (Simple transformation)
+  processed = processed.replace(/^\- (.*$)/gm, '<div>• $1</div>');
+  
+  // 5. Newlines to <br> or <div> (Browsers prefer <div> or <br> in contentEditable)
+  // We replace single newlines with <br> for the initial view
+  processed = processed.replace(/\n/g, '<br/>');
 
   return processed;
 };
@@ -326,7 +360,7 @@ const ContentEditable = React.forwardRef<HTMLDivElement, { html: string, onChang
       if (internalRef.current && internalRef.current.innerHTML !== html) {
         internalRef.current.innerHTML = html;
       }
-    }, []); 
+    }, [html]); // Re-run if html prop significantly changes (e.g. initial load or reset)
 
     const handleInput = (e: React.FormEvent<HTMLDivElement>) => {
       onChange(e.currentTarget.innerHTML);
@@ -345,6 +379,106 @@ const ContentEditable = React.forwardRef<HTMLDivElement, { html: string, onChang
   }
 );
 ContentEditable.displayName = 'ContentEditable';
+
+// --- RICH TEXT EDITOR COMPONENT ---
+// Reusable component for editing HTML/Markdown with Visual and Code modes.
+
+interface RichTextEditorProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  height?: string;
+  placeholder?: string;
+}
+
+const RichTextEditor: React.FC<RichTextEditorProps> = ({ 
+  label, 
+  value, 
+  onChange, 
+  height = "h-48",
+  placeholder 
+}) => {
+  const [editMode, setEditMode] = useState<'visual' | 'code'>('visual');
+  const [internalHtml, setInternalHtml] = useState(value);
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  // Sync internal HTML state when value prop changes externally (e.g. initial load)
+  useEffect(() => {
+    // Determine if we need to upgrade markdown to HTML for visual editor
+    const displayHtml = simpleMarkdownToHtmlForEditor(value);
+    setInternalHtml(displayHtml);
+  }, [value]);
+
+  const handleVisualChange = (newHtml: string) => {
+    setInternalHtml(newHtml);
+    onChange(newHtml);
+  };
+
+  const handleCodeChange = (newCode: string) => {
+    setInternalHtml(newCode); // When in code mode, internal represents the raw code
+    onChange(newCode);
+  };
+
+  const execCmd = (cmd: string, arg?: string) => {
+    document.execCommand(cmd, false, arg);
+    // Force sync state after command
+    if (editorRef.current) {
+        const newHtml = editorRef.current.innerHTML;
+        handleVisualChange(newHtml);
+    }
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm focus-within:ring-2 focus-within:ring-purple-500 transition-all">
+       <div className="bg-gray-50 border-b border-gray-200 p-2 flex justify-between items-center">
+          <label className="text-xs font-bold text-gray-500 uppercase tracking-wide ml-1">{label}</label>
+          <div className="flex bg-gray-200/50 p-0.5 rounded-lg">
+             <button 
+               onClick={() => setEditMode('visual')}
+               className={`px-3 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${editMode === 'visual' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+             >
+                <Eye className="w-3 h-3" /> 可视化
+             </button>
+             <button 
+               onClick={() => setEditMode('code')}
+               className={`px-3 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${editMode === 'code' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+             >
+                <Code className="w-3 h-3" /> 源码
+             </button>
+          </div>
+       </div>
+
+       {editMode === 'visual' ? (
+          <div className="flex flex-col">
+             {/* TOOLBAR */}
+             <div className="border-b border-gray-100 p-1 flex gap-1 flex-wrap bg-white">
+                <button onClick={() => execCmd('bold')} className="p-1.5 hover:bg-gray-100 rounded text-gray-700" title="加粗"><Bold className="w-4 h-4" /></button>
+                <button onClick={() => execCmd('italic')} className="p-1.5 hover:bg-gray-100 rounded text-gray-700" title="斜体"><Italic className="w-4 h-4" /></button>
+                <button onClick={() => execCmd('formatBlock', 'H3')} className="p-1.5 hover:bg-gray-100 rounded text-gray-700 font-bold text-xs" title="标题">H3</button>
+                <div className="w-px bg-gray-200 mx-1 h-6 self-center"></div>
+                <button onClick={() => execCmd('insertUnorderedList')} className="p-1.5 hover:bg-gray-100 rounded text-gray-700" title="无序列表"><List className="w-4 h-4" /></button>
+                <div className="w-px bg-gray-200 mx-1 h-6 self-center"></div>
+                <button onClick={() => execCmd('foreColor', '#dc2626')} className="p-1.5 hover:bg-gray-100 rounded text-red-600 font-bold" title="标红">A</button>
+                <button onClick={() => execCmd('removeFormat')} className="p-1.5 hover:bg-gray-100 rounded text-gray-700" title="清除格式"><Eraser className="w-4 h-4" /></button>
+             </div>
+             <ContentEditable 
+                ref={editorRef}
+                html={internalHtml} 
+                onChange={handleVisualChange}
+                className={`p-4 ${height} overflow-y-auto prose prose-sm max-w-none outline-none text-gray-900 bg-white`}
+             />
+          </div>
+       ) : (
+          <textarea
+            value={value} // Use raw value for code
+            onChange={e => handleCodeChange(e.target.value)}
+            className={`w-full px-3 py-2 font-mono text-xs ${height} outline-none bg-gray-50 text-gray-800 resize-none`}
+            placeholder={placeholder || "<div>...</div> or Markdown"}
+          />
+       )}
+    </div>
+  );
+};
 
 // --- EDIT COMPONENT ---
 interface MistakeEditorProps {
@@ -367,8 +501,6 @@ const MistakeEditor: React.FC<MistakeEditorProps> = ({ data, onSave, onCancel })
     tags: (data.tags || []).join(', '),
     visualComponentsJSON: JSON.stringify(data.visualComponents || [], null, 2)
   });
-  const [editMode, setEditMode] = useState<'visual' | 'code'>('visual');
-  const editorRef = useRef<HTMLDivElement>(null);
 
   const handleSave = () => {
     try {
@@ -386,97 +518,46 @@ const MistakeEditor: React.FC<MistakeEditorProps> = ({ data, onSave, onCancel })
     }
   };
 
-  const execCmd = (cmd: string, arg?: string) => {
-    document.execCommand(cmd, false, arg);
-    // Force sync state after command
-    if (editorRef.current) {
-        setFormData(prev => ({ ...prev, html: editorRef.current!.innerHTML }));
-    }
-  };
-
   return (
     <div className="space-y-4 bg-white p-4 rounded-lg animate-in fade-in duration-200 border border-purple-100 shadow-sm">
-      {/* HTML EDITOR SECTION */}
-      <div>
-         <div className="flex justify-between items-center mb-2">
-            <label className="text-sm font-bold text-gray-700">题目内容</label>
-            <div className="flex bg-gray-100 p-1 rounded-lg">
-               <button 
-                 onClick={() => setEditMode('visual')}
-                 className={`px-3 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${editMode === 'visual' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-               >
-                  <Eye className="w-3 h-3" /> 可视化
-               </button>
-               <button 
-                 onClick={() => setEditMode('code')}
-                 className={`px-3 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${editMode === 'code' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-               >
-                  <Code className="w-3 h-3" /> 源码
-               </button>
-            </div>
-         </div>
-
-         {editMode === 'visual' ? (
-            <div className="border rounded-lg overflow-hidden border-gray-300 focus-within:ring-2 focus-within:ring-purple-500 transition-shadow">
-               {/* TOOLBAR */}
-               <div className="bg-gray-50 border-b border-gray-200 p-2 flex gap-1">
-                  <button onClick={() => execCmd('bold')} className="p-1.5 hover:bg-gray-200 rounded text-gray-700" title="加粗"><Bold className="w-4 h-4" /></button>
-                  <button onClick={() => execCmd('italic')} className="p-1.5 hover:bg-gray-200 rounded text-gray-700" title="斜体"><Italic className="w-4 h-4" /></button>
-                  <div className="w-px bg-gray-300 mx-1"></div>
-                  <button onClick={() => execCmd('foreColor', '#dc2626')} className="p-1.5 hover:bg-gray-200 rounded text-red-600 font-bold" title="标红">A</button>
-                  <button onClick={() => execCmd('removeFormat')} className="p-1.5 hover:bg-gray-200 rounded text-gray-700" title="清除格式"><Eraser className="w-4 h-4" /></button>
-               </div>
-               {/* Use key to force remount when switching back to visual to ensure html prop sync */}
-               <ContentEditable 
-                  key="visual-editor"
-                  ref={editorRef}
-                  html={formData.html} 
-                  onChange={(html) => setFormData({...formData, html})}
-                  className="p-4 min-h-[160px] max-h-[400px] overflow-y-auto prose prose-lg max-w-none outline-none text-gray-900 bg-white"
-               />
-            </div>
-         ) : (
-            <textarea
-              value={formData.html}
-              onChange={e => setFormData({...formData, html: e.target.value})}
-              className="w-full px-3 py-2 border rounded-lg font-mono text-xs h-48 focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 text-gray-800"
-              placeholder="<div>...</div>"
-            />
-         )}
-         <p className="text-xs text-gray-400 mt-1">
-            {editMode === 'visual' ? '可以直接修改文字。如需调整复杂布局(如竖式对齐)，建议切换到源码模式。' : '支持 HTML Tailwind 类名。'}
-         </p>
-      </div>
+      
+      {/* Question Editor */}
+      <RichTextEditor 
+        label="题目内容"
+        value={formData.html}
+        onChange={(val) => setFormData({...formData, html: val})}
+        height="h-48"
+      />
 
        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-bold text-gray-700 mb-1">答案</label>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">答案</label>
           <input
             type="text"
             value={formData.answer}
             onChange={e => setFormData({...formData, answer: e.target.value})}
-            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none transition-shadow"
           />
         </div>
         <div>
-          <label className="block text-sm font-bold text-gray-700 mb-1">标签</label>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">标签 (逗号分隔)</label>
           <input
             type="text"
             value={formData.tags}
             onChange={e => setFormData({...formData, tags: e.target.value})}
-            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none transition-shadow"
           />
         </div>
        </div>
 
-       <div>
-        <label className="block text-sm font-bold text-gray-700 mb-1">解析 (Markdown)</label>
-        <textarea
-          value={formData.explanation}
-          onChange={e => setFormData({...formData, explanation: e.target.value})}
-          className="w-full px-3 py-2 border rounded-lg h-24 focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-        />
-      </div>
+       {/* Explanation Editor - Supports Markdown/HTML Visual Editing */}
+       <RichTextEditor 
+         label="解析 (支持 Markdown/HTML)"
+         value={formData.explanation}
+         onChange={(val) => setFormData({...formData, explanation: val})}
+         height="h-32"
+       />
+
       <div>
         <details className="group">
             <summary className="cursor-pointer text-xs font-bold text-gray-500 hover:text-purple-600 transition-colors flex items-center gap-1 select-none">
