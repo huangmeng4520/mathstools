@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { 
@@ -35,6 +36,7 @@ import {
   Heading1
 } from 'lucide-react';
 import { MistakeRecord, VisualComponentData, Question, AddMistakePayload, Option } from '../types';
+import { api } from '../services/api';
 import { ClockVisualizer } from './ClockVisualizer';
 import { NumberLine } from './NumberLine';
 import { FractionVisualizer } from './FractionVisualizer';
@@ -194,10 +196,13 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
   // SAFEGUARD
   const props = visual.props || {};
 
+  // NOTE: Added print:animate-none to prevent animations from hiding content during print
+  const commonClasses = "my-4 flex justify-center animate-in fade-in zoom-in duration-300 print:animate-none print:my-2";
+
   switch (visual.type) {
     case 'clock':
       return (
-        <div className="my-4 flex justify-center animate-in fade-in zoom-in duration-300">
+        <div className={commonClasses}>
           <ClockVisualizer 
             hour={props.hour} 
             minute={props.minute}
@@ -208,7 +213,7 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
       );
     case 'numberLine':
       return (
-        <div className="my-4 flex justify-center animate-in fade-in zoom-in duration-300 w-full overflow-x-auto">
+        <div className={`${commonClasses} w-full overflow-x-auto`}>
           <NumberLine 
             min={props.min}
             max={props.max}
@@ -220,7 +225,7 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
       );
     case 'fraction':
       return (
-        <div className="my-4 flex justify-center animate-in fade-in zoom-in duration-300">
+        <div className={commonClasses}>
            <FractionVisualizer 
              numerator={props.numerator}
              denominator={props.denominator}
@@ -231,7 +236,7 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
       );
     case 'geometry':
       return (
-        <div className="my-4 flex justify-center animate-in fade-in zoom-in duration-300">
+        <div className={commonClasses}>
             <GeometryVisualizer 
               shape={props.shape}
               width={props.width}
@@ -245,7 +250,7 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
       );
     case 'lineSegment':
       return (
-        <div className="my-4 flex justify-center animate-in fade-in zoom-in duration-300">
+        <div className={commonClasses}>
             <LineSegmentVisualizer 
                total={props.total}
                totalLabel={props.totalLabel}
@@ -257,7 +262,7 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
       );
     case 'emoji':
       return (
-        <div className="my-4 flex justify-center animate-in fade-in zoom-in duration-300">
+        <div className={commonClasses}>
             <EmojiCounter 
               icon={props.icon || "🍎"}
               count={props.count || 1}
@@ -267,7 +272,7 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
       );
     case 'grid':
       return (
-        <div className="my-4 flex justify-center animate-in fade-in zoom-in duration-300">
+        <div className={commonClasses}>
             <GridVisualizer 
               rows={props.rows}
               cols={props.cols}
@@ -731,6 +736,10 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   const [showVariationPreview, setShowVariationPreview] = useState(false);
   const [currentVariation, setCurrentVariation] = useState<{html: string, answer: string, explanation: string, tags: string[], visualComponents?: VisualComponentData[]} | null>(null);
   const [currentOriginalMistake, setCurrentOriginalMistake] = useState<MistakeRecord | null>(null);
+
+  // Print State
+  const [isPreparingPrint, setIsPreparingPrint] = useState(false);
+  const [printMistakes, setPrintMistakes] = useState<MistakeRecord[]>([]);
 
   // Cropping State
   const [cropRect, setCropRect] = useState<{x: number, y: number, w: number, h: number} | null>(null);
@@ -1374,8 +1383,23 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   };
 
   // --- PRINTING ---
-  const handlePrint = () => {
-    window.print();
+  const handlePrint = async () => {
+    setIsPreparingPrint(true);
+    try {
+      // Fetch all mistakes (limit 1000 should cover most use cases for a personal notebook)
+      const { items } = await api.getMistakes(1, 1000); 
+      setPrintMistakes(items);
+      
+      // Allow DOM to update
+      setTimeout(() => {
+        window.print();
+        setIsPreparingPrint(false);
+      }, 500);
+    } catch (e) {
+      console.error("Failed to prepare print data", e);
+      alert("无法获取全部数据用于打印");
+      setIsPreparingPrint(false);
+    }
   };
 
   // --- RENDERING ---
@@ -1386,11 +1410,17 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
       <style>{`
         @media print {
           @page {
-            margin: 2cm;
+            margin: 1.5cm;
             size: A4;
           }
           body {
             background: white;
+            color: black;
+          }
+          /* Ensure backgrounds (colors/images) are printed */
+          * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
         }
       `}</style>
@@ -1411,11 +1441,12 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                <>
                  <button 
                     onClick={handlePrint}
-                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl shadow-sm font-bold flex items-center gap-2 hover:bg-gray-200 transition-colors"
-                    title="打印本页错题"
+                    disabled={isPreparingPrint}
+                    className={`px-4 py-2 bg-gray-100 text-gray-700 rounded-xl shadow-sm font-bold flex items-center gap-2 transition-colors ${isPreparingPrint ? 'cursor-not-allowed opacity-70' : 'hover:bg-gray-200'}`}
+                    title="打印全部错题"
                  >
-                    <Printer className="w-5 h-5" />
-                    <span className="hidden md:inline">打印</span>
+                    {isPreparingPrint ? <Loader2 className="w-5 h-5 animate-spin"/> : <Printer className="w-5 h-5" />}
+                    <span className="hidden md:inline">{isPreparingPrint ? '准备中...' : '打印'}</span>
                  </button>
                  <button 
                     onClick={handleStartReview}
@@ -1834,45 +1865,65 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
       {/* PRINT VIEW (HIDDEN ON SCREEN) */}
       <div className="hidden print:block bg-white text-black p-8">
-         <div className="text-center mb-8 border-b-2 border-black pb-4">
-            <h1 className="text-3xl font-bold mb-2">智能错题本 - 复习卷</h1>
-            <p className="text-sm text-gray-500">生成时间：{new Date().toLocaleDateString()}</p>
+         <div className="text-center mb-6 border-b-2 border-black pb-4">
+            <h1 className="text-2xl font-bold mb-1">智能错题本 - 复习卷</h1>
+            <p className="text-xs text-gray-500">生成时间：{new Date().toLocaleDateString()} &nbsp;•&nbsp; 共 {printMistakes.length > 0 ? printMistakes.length : mistakes.length} 题</p>
          </div>
          
-         {mistakes?.length === 0 ? (
-            <div className="text-center text-gray-500">没有错题可打印</div>
+         {printMistakes.length === 0 && mistakes.length === 0 ? (
+            <div className="text-center text-gray-500">正在准备打印数据...</div>
          ) : (
-            mistakes.map((m, i) => (
-               <div key={m.id} className="mb-8 break-inside-avoid border-b border-dashed border-gray-300 pb-6">
-                  <div className="flex justify-between items-start mb-4">
-                     <div className="flex items-center gap-2">
-                        <span className="text-xl font-bold mr-2">{i + 1}.</span>
-                        <div className="flex gap-2">
+            <div className="space-y-6">
+              {(printMistakes.length > 0 ? printMistakes : mistakes).map((m, i) => (
+                 <div key={m.id} className="break-inside-avoid border-b border-gray-200 pb-4 mb-4">
+                    {/* Header: ID and Tags */}
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="font-bold text-lg bg-black text-white w-6 h-6 flex items-center justify-center rounded-full text-xs">{i + 1}</span>
+                        <div className="flex gap-1">
                            {m.tags.map(t => (
-                              <span key={t} className="text-xs font-bold border border-gray-400 px-2 py-0.5 rounded">{t}</span>
+                              <span key={t} className="text-[10px] font-bold border border-gray-400 px-1.5 py-0.5 rounded text-gray-600">{t}</span>
                            ))}
                         </div>
-                     </div>
-                  </div>
-                  
-                  {/* Content */}
-                  <div className="pl-8 mb-6">
-                     <div 
-                        className="prose prose-lg max-w-none text-black mb-4" 
-                        dangerouslySetInnerHTML={{__html: m.htmlContent}} 
-                     />
-                     {m.visualComponents && m.visualComponents.map((vc, idx) => (
-                        <div key={idx} className="my-4 border-none">
-                           {renderVisualComponent(vc)}
+                    </div>
+
+                    <div className="flex gap-6 items-start">
+                        {/* Left Column: Original Image (if exists) */}
+                        {m.imageData && (
+                           <div className="w-1/3 shrink-0 flex flex-col gap-1">
+                              <div className="border border-gray-200 rounded p-1">
+                                <img src={m.imageData} className="w-full object-contain max-h-[5cm]" alt="原题" />
+                              </div>
+                              <span className="text-[10px] text-center text-gray-400">原题截图</span>
+                           </div>
+                        )}
+                        
+                        {/* Right Column: Content */}
+                        <div className="flex-1 min-w-0">
+                           <div 
+                              className="prose prose-sm max-w-none text-black leading-snug" 
+                              dangerouslySetInnerHTML={{__html: m.htmlContent}} 
+                           />
+                           
+                           {/* Visual Components - Scaled down slightly for print */}
+                           {m.visualComponents && m.visualComponents.length > 0 && (
+                              <div className="my-2 p-2 border border-dashed border-gray-300 rounded bg-gray-50/50 print:bg-transparent">
+                                 {m.visualComponents.map((vc, idx) => (
+                                    <div key={idx} className="scale-90 origin-left">
+                                       {renderVisualComponent(vc)}
+                                    </div>
+                                 ))}
+                              </div>
+                           )}
+                           
+                           {/* Workspace for student */}
+                           <div className="mt-4 pt-4 border-t border-dotted border-gray-300">
+                              <p className="text-[10px] text-gray-400 mb-8">解题区：</p>
+                           </div>
                         </div>
-                     ))}
-
-                  </div>
-
-                  {/* Space for working out */}
-                  <div className="h-32"></div>
-               </div>
-            ))
+                    </div>
+                 </div>
+              ))}
+            </div>
          )}
       </div>
     </>
