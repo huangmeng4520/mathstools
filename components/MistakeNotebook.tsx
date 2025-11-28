@@ -41,6 +41,7 @@ import { NumberLine } from './NumberLine';
 import { FractionVisualizer } from './FractionVisualizer';
 import { GeometryVisualizer } from './GeometryVisualizer';
 import { EmojiCounter } from './EmojiCounter';
+import { GridVisualizer } from './GridVisualizer';
 
 // --- CONSTANTS ---
 const VISUAL_COMPONENT_INSTRUCTION = `
@@ -52,6 +53,7 @@ const VISUAL_COMPONENT_INSTRUCTION = `
 4. 几何图形 (geometry): { "type": "geometry", "props": { "shape": "rectangle"|"square"|"triangle"|"parallelogram"|"trapezoid", "width": number, "height": number, "topWidth": number(for trapezoid), "offset": number(for triangle/parallelogram), "showHeight": boolean, "labels": { "top": "string", "bottom": "string", "left": "string", "right": "string", "height": "string", "center": "string" } } }
 5. 线段图 (lineSegment): { "type": "lineSegment", "props": { "total": number|null, "totalLabel": "string", "segments": [{"value": number, "label": "string", "color": "string"}], "points": [{"label": "string", "at": "start"|"end"}] } }
 6. 物品计数 (emoji): { "type": "emoji", "props": { "icon": "string(emoji, e.g. 🍎, 🚗, ✏️)", "count": number, "label": "string" } }
+7. 阵列/矩阵 (grid): { "type": "grid", "props": { "rows": number, "cols": number, "itemType": "circle"|"square"|"emoji", "icon": "string", "label": "string" } }
 `;
 
 // --- MARKDOWN & MATH RENDERER ---
@@ -336,6 +338,18 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
             <EmojiCounter 
               icon={props.icon || "🍎"}
               count={props.count || 1}
+              label={props.label}
+            />
+        </div>
+      );
+    case 'grid':
+      return (
+        <div className="my-4 flex justify-center animate-in fade-in zoom-in duration-300">
+            <GridVisualizer 
+              rows={props.rows}
+              cols={props.cols}
+              itemType={props.itemType}
+              icon={props.icon}
               label={props.label}
             />
         </div>
@@ -947,7 +961,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
           "html": "题目内容的 HTML（使用 Tailwind 类，字体大 text-2xl/3xl）。如果有可视化组件，请在 HTML 中预留位置或文字说明，组件将单独渲染。",
           "visualComponents": [
              {
-                "type": "clock | numberLine | fraction | geometry | none | emoji",
+                "type": "clock | numberLine | fraction | geometry | none | emoji | grid",
                 "props": { ... }
              }
           ],
@@ -1226,7 +1240,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
             "html": "题目内容的 HTML（使用 Tailwind 类，字体大 text-2xl/3xl，重点数字加粗）。",
             "visualComponents": [
               {
-                "type": "clock | numberLine | fraction | geometry | none | emoji",
+                "type": "clock | numberLine | fraction | geometry | none | emoji | grid",
                 "props": { ... }
               }
             ],

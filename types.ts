@@ -1,4 +1,5 @@
 
+
 import { ReactNode } from 'react';
 
 export interface Question {
@@ -30,7 +31,7 @@ export interface ReviewResult {
 }
 
 // --- Visual Component Types ---
-export type VisualComponentType = 'clock' | 'block' | 'numberLine' | 'fraction' | 'geometry' | 'lineSegment' | 'emoji' | 'none';
+export type VisualComponentType = 'clock' | 'block' | 'numberLine' | 'fraction' | 'geometry' | 'lineSegment' | 'emoji' | 'grid' | 'none';
 
 export interface VisualComponentData {
   type: VisualComponentType;
