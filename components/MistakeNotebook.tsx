@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { 
@@ -784,6 +783,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 }) => {
   const [view, setView] = useState<'list' | 'add'>('list');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isConverting, setIsConverting] = useState(false);
   const [generatingVariationId, setGeneratingVariationId] = useState<string | null>(null);
   
   // New entry state
@@ -1022,9 +1022,74 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   };
 
   // --- Image Logic ---
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    setIsConverting(true);
+    let processFile = file;
+
+    // HEIC Conversion Logic
+    try {
+       // Check for HEIC/HEIF file types by extension or mime type
+       const isHeic = file.name.toLowerCase().endsWith('.heic') || 
+                      file.name.toLowerCase().endsWith('.heif') || 
+                      file.type === 'image/heic' || 
+                      file.type === 'image/heif';
+
+       if (isHeic) {
+           console.log("Detected HEIC file, starting conversion...");
+           
+           // Dynamically import heic2any to process the file
+           // @ts-ignore
+           const heic2anyModule = await import('heic2any');
+           // Handle ESM default export compatibility
+           const heic2any = heic2anyModule.default || heic2anyModule;
+           
+           // Read file as ArrayBuffer to ensure we have the complete raw bytes
+           const arrayBuffer = await file.arrayBuffer();
+           
+           // Create a blob with the correct type using the array buffer
+           const blob = new Blob([arrayBuffer], { type: "image/heic" });
+
+           const blobOrBlobArr = await heic2any({
+               blob: blob,
+               toType: "image/jpeg",
+               quality: 0.8
+           });
+           
+           const resultBlob = Array.isArray(blobOrBlobArr) ? blobOrBlobArr[0] : blobOrBlobArr;
+           processFile = new File([resultBlob], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
+       }
+    } catch (err: any) {
+       console.error("HEIC Conversion Failed:", err);
+       
+       // Handle specific library errors
+       const msg = (err.message || (typeof err === 'object' ? JSON.stringify(err) : String(err))).toString();
+
+       if (msg.includes("Image is already browser readable")) {
+           // Case: The file was detected as HEIC but heic2any thinks it's already a JPEG/PNG
+           // Just use the original file and proceed
+           console.log("Image is already readable, skipping conversion.");
+           
+           // FIX: Force MIME type to image/jpeg so FileReader creates a usable Data URL
+           // Re-read buffer from original file since it wasn't converted
+           const buffer = await file.arrayBuffer();
+           processFile = new File([buffer], file.name.replace(/\.(heic|heif)$/i, ".jpg"), { type: "image/jpeg" });
+
+       } else if (msg.includes("ERR_LIBHEIF")) {
+           alert("抱歉，当前浏览器环境不支持此 HEIC 图片格式。请尝试在相册中将其保存为 JPG 后上传。");
+           setIsConverting(false);
+           if (fileInputRef.current) fileInputRef.current.value = '';
+           return;
+       } else {
+           alert(`图片格式转换失败: ${msg}。请尝试使用 JPG 或 PNG 格式。`);
+           setIsConverting(false);
+           if (fileInputRef.current) fileInputRef.current.value = '';
+           return;
+       }
+    }
+
     const reader = new FileReader();
     reader.onloadend = () => {
       setOriginalImageSrc(reader.result as string);
@@ -1032,8 +1097,9 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
       setAnalyzedData([]);
       setCropRect(null);
       setRetryPrompt('');
+      setIsConverting(false);
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(processFile);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -1407,20 +1473,32 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
         {view === 'add' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
             {!originalImageSrc ? (
-               <div className="border-4 border-dashed border-gray-200 rounded-2xl p-12 text-center hover:bg-blue-50 hover:border-blue-300 transition-colors cursor-pointer relative bg-white">
+               <div className={`border-4 border-dashed border-gray-200 rounded-2xl p-12 text-center hover:bg-blue-50 hover:border-blue-300 transition-colors cursor-pointer relative bg-white ${isConverting ? 'opacity-50 pointer-events-none' : ''}`}>
                  <input 
                    ref={fileInputRef}
                    type="file" 
-                   accept="image/*" 
+                   accept="image/*,.heic,.heif" 
                    // capture="environment" // REMOVED: Allow gallery selection on mobile
                    onChange={handleImageUpload} 
                    className="absolute inset-0 opacity-0 cursor-pointer"
+                   disabled={isConverting}
                  />
-                 <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                   <Camera className="w-10 h-10" />
-                 </div>
-                 <h3 className="text-xl font-bold text-gray-800 mb-2">点击拍照或上传错题</h3>
-                 <p className="text-gray-500">支持竖式、应用题、图形题</p>
+                 
+                 {isConverting ? (
+                    <div className="flex flex-col items-center justify-center">
+                        <Loader2 className="w-10 h-10 animate-spin text-blue-500 mb-4" />
+                        <h3 className="text-xl font-bold text-gray-800 mb-2">正在处理图片...</h3>
+                        <p className="text-gray-500">HEIC 格式转换可能需要一点时间</p>
+                    </div>
+                 ) : (
+                    <>
+                        <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Camera className="w-10 h-10" />
+                        </div>
+                        <h3 className="text-xl font-bold text-gray-800 mb-2">点击拍照或上传错题</h3>
+                        <p className="text-gray-500">支持竖式、应用题、图形题 (支持 JPG, PNG, HEIC)</p>
+                    </>
+                 )}
                </div>
             ) : !newImage ? (
                // CROP UI
