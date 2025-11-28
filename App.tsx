@@ -246,7 +246,7 @@ export default function App() {
         </div>
 
         {/* MAIN QUESTION AREA */}
-        <main className="flex-1 max-w-3xl w-full mx-auto p-4 md:p-6 pb-40 overflow-visible flex flex-col">
+        <main className="flex-1 max-w-3xl w-full mx-auto p-4 md:p-6 overflow-visible flex flex-col">
           {/* Question Card */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6 flex-1 flex flex-col items-center justify-center min-h-[200px]">
              {currentQuestion.title && (
@@ -337,16 +337,20 @@ export default function App() {
                 })}
              </div>
           </div>
+          
+          {/* SPACER DIV TO PREVENT FOOTER OVERLAP */}
+          {/* This explicit height ensures content scrolls above the fixed footer */}
+          <div className="h-48 md:h-64 flex-shrink-0 w-full"></div>
         </main>
 
         {/* FOOTER ACTIONS */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-20">
           <div className="max-w-3xl mx-auto flex flex-col md:flex-row gap-4 items-center justify-between">
-            <div className="flex-1 w-full">
+            <div className="flex-1 w-full max-h-[40vh] overflow-y-auto custom-scrollbar">
               {isCorrect === null ? (
                 <div className="text-gray-500 text-sm flex items-center gap-2">
-                  <Lightbulb className="w-4 h-4 text-yellow-500" />
-                  提示: {currentQuestion.hint || "仔细思考，相信你可以！"}
+                  <Lightbulb className="w-4 h-4 text-yellow-500 shrink-0" />
+                  <span>提示: {currentQuestion.hint || "仔细思考，相信你可以！"}</span>
                 </div>
               ) : (
                   <div className={`p-3 rounded-lg text-sm ${isCorrect ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'} animate-in slide-in-from-bottom-2`}>
@@ -354,12 +358,12 @@ export default function App() {
                        {isCorrect ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
                        {isCorrect ? '回答正确！🎉' : '再想一想...'}
                     </p>
-                    <div className="max-h-24 overflow-auto custom-scrollbar">{currentQuestion.explanation}</div>
+                    <div className="max-h-32 overflow-auto custom-scrollbar">{currentQuestion.explanation}</div>
                   </div>
               )}
             </div>
 
-            <div className="w-full md:w-auto shrink-0">
+            <div className="w-full md:w-auto shrink-0 mt-2 md:mt-0">
               {isCorrect === null ? (
                 <button 
                   onClick={handleSubmit}

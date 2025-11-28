@@ -1,76 +1,75 @@
-# 后端开发规范与架构文档
+# 后端开发规范与架构文档 (DeepSeek 集成版)
 
 ## 1. 项目概述
-本项目旨在构建一个智能化的数学错题管理与复习系统。前端采用 React + Tailwind，目前需构建后端服务以支持多用户数据持久化、AI 过程管理及复杂的复习算法。
+本项目旨在构建一个智能化的数学错题管理与复习系统。前端采用 React + Tailwind。
+**架构升级目标**：实现前后端分离，后端负责数据持久化、图片存储、以及基于 **DeepSeek (R1/V3)** 的 AI 核心业务逻辑封装。
 
 ## 2. 技术栈选型
-*   **Runtime**: Node.js (v18+)
-*   **Framework**: Express.js 或 NestJS (推荐 NestJS 以获得更好的模块化支持)
+*   **Runtime**: Node.js (v18+) 或 Python (FastAPI - 推荐用于 AI 密集型处理)
+*   **Framework**: NestJS (Node) 或 FastAPI (Python)
 *   **Database**: MongoDB (v6.0+)
 *   **ODM**: Mongoose
 *   **Auth**: JWT (JSON Web Tokens)
-*   **AI Integration**: Google Gemini API (服务端调用)
-*   **Storage**: AWS S3 / Aliyun OSS (用于存储错题图片) 或 MongoDB GridFS
+*   **AI Engine**: 
+    *   **DeepSeek-R1**: 用于复杂的错题归因、解题步骤推理、变式题生成（利用其强大的 Chain-of-Thought 能力）。
+    *   **DeepSeek-V3**: 用于一般的自然语言交互和标签分类。
+    *   **Vision/OCR 服务**: 由于 R1 主要为文本推理，建议后端集成专门的 OCR 服务（或 DeepSeek-VL）将图片转化为数学文本/LaTeX。
+*   **Storage**: AWS S3 / Aliyun OSS (用于存储错题图片)
 
 ## 3. 数据库设计 (MongoDB Schema)
 
 ### 3.1 用户 (User)
+*(保持不变)*
 ```javascript
 {
   _id: ObjectId,
   username: String,
   passwordHash: String,
-  gradeLevel: Number, // 1-6
+  gradeLevel: Number, 
   createdAt: Date
 }
 ```
 
 ### 3.2 错题记录 (Mistake)
-核心业务数据，存储错题内容、AI 分析结果及复习状态。
+新增 `aiAnalysis` 字段用于存储推理过程。
 
 ```javascript
 {
   _id: ObjectId,
-  userId: ObjectId, // 关联用户
+  userId: ObjectId,
   
   // 原图信息
   originalImage: {
-    url: String, // 图片存储地址
-    fileId: String // 对象存储ID
+    url: String, 
+    fileId: String
   },
   
-  // 题目内容 (AI 生成或人工修正)
+  // 题目内容
   content: {
-    html: String, // 题目文本HTML
-    visualComponent: {
-      type: String, // 'clock', 'numberLine', etc.
-      props: Object // 组件参数
-    }
+    html: String, 
+    visualComponent: [VisualComponentData] // 支持数组
   },
   
   // 解答与标签
   answer: String,
-  explanation: String, // Markdown 格式
+  explanation: String,
   tags: [String],
-  
-  // 过程管理状态
-  status: {
-    type: String,
-    enum: ['processing', 'active', 'archived', 'deleted'],
-    default: 'active'
+
+  // DeepSeek 特有字段
+  aiAnalysis: {
+    model: String, // e.g., "deepseek-r1"
+    thinkingProcess: String, // 存储 <think> 标签内的思考过程
+    rawResponse: String // 原始响应备份
   },
   
-  // 复习算法数据 (SRS - Spaced Repetition System)
+  // 过程管理状态
+  status: { type: String, enum: ['active', 'deleted'], default: 'active' },
+  
+  // SRS 复习数据
   srs: {
     nextReviewAt: Date,
-    lastReviewAt: Date,
     reviewCount: Number,
-    interval: Number, // 当前间隔天数
-    easeFactor: Number, // 难度系数 (默认 2.5)
-    masteryLevel: {
-      type: String,
-      enum: ['new', 'learning', 'reviewing', 'mastered']
-    }
+    masteryLevel: { type: String, enum: ['new', 'learning', 'reviewing', 'mastered'] }
   },
   
   createdAt: Date,
@@ -78,84 +77,63 @@
 }
 ```
 
-### 3.3 复习日志 (ReviewLog)
-用于记录每一次做题结果，便于生成统计报表。
+## 4. AI 服务端处理流程 (DeepSeek Pipeline)
 
-```javascript
-{
-  _id: ObjectId,
-  userId: ObjectId,
-  mistakeId: ObjectId,
-  isCorrect: Boolean,
-  duration: Number, // 答题耗时(秒)
-  reviewedAt: Date
-}
-```
+前端不再直接调用 AI，而是将图片/文本发送给后端。
 
-## 4. API 接口定义 (RESTful)
+### 4.1 错题分析接口 (`POST /api/ai/analyze`)
 
-所有接口需在 Header 中携带 `Authorization: Bearer <token>`。
+**输入**: `Multipart/Form-Data` (包含图片文件)
+**输出**: 标准 Mistake JSON 结构
 
-### 4.1 错题管理
+**后端处理逻辑**:
+1.  **Upload**: 将图片上传至 OSS，获得 `img_url`。
+2.  **OCR/Vision Step**:
+    *   调用 Vision 模型（或 OCR API）提取图片中的文本和 LaTeX 公式。
+    *   *Prompt 示例*: "提取图中的数学题目，输出纯文本，公式用 LaTeX 包裹。"
+3.  **Reasoning Step (DeepSeek-R1)**:
+    *   构造 Prompt: 将 OCR 得到的文本 + System Prompt (包含 HTML/JSON 格式要求) 发送给 DeepSeek-R1。
+    *   *System Prompt*: "你是一个小学数学专家。请分析以下题目错误原因... 请严格按 JSON 格式输出..."
+4.  **Parsing & Cleaning**:
+    *   **提取思考**: 从返回内容中正则提取 `<think>(.*?)</think>` 内容，存入 `thinkingProcess`。
+    *   **提取 JSON**: 过滤掉 `<think>` 部分和 Markdown 代码块 (```json)，利用 `JSON.parse` 尝试解析。如果不合法，触发重试机制或使用 `jsonrepair` 工具。
+5.  **Response**: 返回清洗后的 JSON + `thinkingProcess` 给前端预览。
 
-*   **GET /api/mistakes**
-    *   Query: `page`, `limit`, `tag`, `status`
-    *   Desc: 获取错题列表分页数据。
+### 4.2 变式生成接口 (`POST /api/ai/generate-variation`)
 
-*   **GET /api/mistakes/review-queue**
-    *   Desc: 获取当前需要复习的题目列表 (nextReviewAt <= now)。
+**输入**: `{ originalMistakeId, difficulty: 'same' | 'harder' }`
+**输出**: 变式题 JSON
 
-*   **POST /api/mistakes**
-    *   Body: `{ imageBase64, customPrompt }`
-    *   Desc: 上传错题。
-    *   **Process**:
-        1. 服务端将 Base64 转存至 OSS。
-        2. 调用 Gemini API 进行 OCR 和题目分析。
-        3. 构建 Mistake 对象并在 DB 中创建。
-    *   Response: 创建好的完整 Mistake 对象。
+**后端处理逻辑**:
+1.  查询数据库获取原题内容 (HTML/Answer/Tags)。
+2.  调用 **DeepSeek-R1**。
+    *   *Prompt*: "参考原题逻辑，生成一道考察相同知识点的新题。要求数字不同但逻辑一致..."
+3.  清洗 JSON 并返回。
 
-*   **PUT /api/mistakes/:id**
-    *   Desc: 手动修正题目内容、标签或答案。
+## 5. API 接口定义 (RESTful)
 
-*   **DELETE /api/mistakes/:id**
-    *   Desc: 软删除错题 (status -> deleted)。
+### 基础业务
+*   `GET /api/mistakes`: 获取列表
+*   `GET /api/mistakes/review-queue`: 获取复习队列
+*   `POST /api/mistakes`: 保存错题 (在 /analyze 预览确认后调用)
+*   `DELETE /api/mistakes/:id`: 删除
+*   `POST /api/mistakes/:id/review`: 提交复习结果
 
-### 4.2 复习与闯关
+### AI 专用
+*   `POST /api/ai/analyze`: 上传图片 -> OCR -> DeepSeek -> 返回分析结果 (无状态，不存库，仅预览)
+*   `POST /api/ai/generate-variation`: 基于错题上下文生成新题
 
-*   **POST /api/mistakes/:id/review**
-    *   Body: `{ success: Boolean }`
-    *   Desc: 提交单题复习结果。
-    *   **Logic**:
-        1. 记录 ReviewLog。
-        2. 根据 SM-2 算法或简易间隔算法更新 `srs` 字段 (nextReviewAt, interval)。
+## 6. DeepSeek 集成注意事项
 
-*   **POST /api/quiz/generate**
-    *   Body: `{ mistakeIds: [] }`
-    *   Desc: 基于选定错题生成闯关试卷 (包含干扰项)。
-    *   **Logic**: 调用 AI 生成干扰项，返回临时 Quiz 对象。
-
-## 5. 过程管理与 AI 交互流
-
-### 5.1 错题录入流
-1.  **Frontend**: 用户上传图片 -> 裁剪 -> `POST /api/mistakes`
-2.  **Backend**:
-    *   接收图片。
-    *   **Step A**: 上传图片到 OSS，获取 URL。
-    *   **Step B**: 组装 Prompt，调用 Gemini API。要求返回标准 JSON 格式 (HTML + Visual Props)。
-    *   **Step C**: 数据存入 MongoDB，初始状态 `masteryLevel: 'new'`。
-3.  **Frontend**: 接收响应，展示在列表中。
-
-### 5.2 复习算法 (简化版)
-后端需实现以下逻辑更新 `nextReviewAt`:
-*   If `success`:
-    *   `interval = previous_interval * 2` (或者使用 easeFactor)
-    *   `nextReviewAt = now + interval`
-*   If `fail`:
-    *   `interval = 1 day`
-    *   `nextReviewAt = now + 1 day`
-
-## 6. 开发阶段 Mock 策略
-在后端未就绪时，前端 `services/api.ts` 将模拟上述接口行为：
-*   使用 `localStorage` 模拟 MongoDB。
-*   使用 `setTimeout` 模拟网络延迟。
-*   保持数据结构与上述 Schema 一致，便于后期平滑迁移。
+1.  **Base URL Compatibility**: DeepSeek 支持 OpenAI SDK 格式。
+    ```javascript
+    const OpenAI = require('openai');
+    const client = new OpenAI({
+      baseURL: 'https://api.deepseek.com',
+      apiKey: process.env.DEEPSEEK_API_KEY
+    });
+    ```
+2.  **Temperature 设置**:
+    *   对于数学解题 (Reasoning)，建议 Temperature 设置为 `0.5` - `0.7` 以平衡创造性和准确性。
+    *   对于 JSON 格式化输出，建议 Temperature 设置为 `0.0` - `0.3` 以保证格式稳定。
+3.  **Context Window**: 利用 DeepSeek 的长上下文能力（V3 支持 64K/128K），可以在 Prompt 中由后端注入更多用户的历史错题作为 Few-Shot examples，实现个性化分析。
