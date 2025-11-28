@@ -9,7 +9,7 @@ import { MistakeRecord, User, AuthResponse, AddMistakePayload, VisualComponentDa
 
 // --- CONFIGURATION ---
 const USE_MOCK_API = true; 
-const BASE_URL = 'http://43.153.53.145:4000';
+const BASE_URL = 'http://localhost:3000';
 const STORAGE_KEY = 'math_master_mistakes_v2';
 const TOKEN_KEY = 'math_master_token';
 const MOCK_DELAY = 500;
