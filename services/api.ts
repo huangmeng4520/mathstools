@@ -1,4 +1,5 @@
-import { MistakeRecord, User, AuthResponse, AddMistakePayload } from '../types';
+
+import { MistakeRecord, User, AuthResponse, AddMistakePayload, VisualComponentData } from '../types';
 
 /**
  * API Service Layer
@@ -7,7 +8,7 @@ import { MistakeRecord, User, AuthResponse, AddMistakePayload } from '../types';
  */
 
 // --- CONFIGURATION ---
-const USE_MOCK_API = false; 
+const USE_MOCK_API = true; 
 const BASE_URL = 'http://43.153.53.145:4000';
 const STORAGE_KEY = 'math_master_mistakes_v2';
 const TOKEN_KEY = 'math_master_token';
@@ -139,7 +140,7 @@ const MockApi: ApiService = {
     return new Promise((resolve) => {
       setTimeout(() => {
         const json = localStorage.getItem(STORAGE_KEY);
-        let allMistakes: MistakeRecord[] = json ? JSON.parse(json) : [];
+        let allMistakes: any[] = json ? JSON.parse(json) : [];
         
         // 1. Filter deleted
         const activeMistakes = allMistakes.filter(m => m.status !== 'deleted');
@@ -151,7 +152,11 @@ const MockApi: ApiService = {
         const total = activeMistakes.length;
         const startIndex = (page - 1) * limit;
         const endIndex = startIndex + limit;
-        const items = activeMistakes.slice(startIndex, endIndex);
+        const items = activeMistakes.slice(startIndex, endIndex).map(m => ({
+           ...m,
+           // Normalize legacy data
+           visualComponents: m.visualComponents || (m.visualComponent ? [m.visualComponent] : [])
+        }));
 
         resolve({ items, total });
       }, MOCK_DELAY);
@@ -161,10 +166,13 @@ const MockApi: ApiService = {
     return new Promise((resolve) => {
       setTimeout(() => {
         const json = localStorage.getItem(STORAGE_KEY);
-        let allMistakes: MistakeRecord[] = json ? JSON.parse(json) : [];
+        let allMistakes: any[] = json ? JSON.parse(json) : [];
         const now = Date.now();
         // Filter for active items where nextReviewAt is in the past (due)
-        const due = allMistakes.filter(m => m.status !== 'deleted' && m.nextReviewAt <= now);
+        const due = allMistakes.filter(m => m.status !== 'deleted' && m.nextReviewAt <= now).map(m => ({
+           ...m,
+           visualComponents: m.visualComponents || (m.visualComponent ? [m.visualComponent] : [])
+        }));
         resolve(due);
       }, MOCK_DELAY);
     });
@@ -187,7 +195,7 @@ const MockApi: ApiService = {
                 userId: 'mock-user-1',
                 imageData: inputData.originalImage.url,
                 htmlContent: m.html,
-                visualComponent: m.visualComponent, // Ensure visual component is passed
+                visualComponents: m.visualComponents, // New array field
                 answer: m.answer,
                 explanation: m.explanation,
                 tags: m.tags,
@@ -200,10 +208,10 @@ const MockApi: ApiService = {
                 originalMistakeId: m.originalMistakeId
             }));
         } else {
-            // Single insert
+            // Single insert (adaptation)
             const singleData = data as any;
              newRecords = [{ 
-                ...singleData, 
+                ...singleData,
                 id: Date.now().toString(), 
                 status: 'active', 
                 createdAt: Date.now(), 
@@ -211,7 +219,8 @@ const MockApi: ApiService = {
                 reviewCount: 0, 
                 masteryLevel: 'new', 
                 nextReviewAt: Date.now(), 
-                userId: 'mock-user-1'
+                userId: 'mock-user-1',
+                visualComponents: singleData.visualComponents || (singleData.visualComponent ? [singleData.visualComponent] : [])
             }];
         }
         
@@ -344,7 +353,14 @@ const RealApi: ApiService = {
         id: mistake._id || mistake.id,
         userId: mistake.userId,
         htmlContent: mistake.content?.html || mistake.htmlContent,
-        visualComponent: mistake.content?.visualComponent || mistake.visualComponent,
+        // Normalize Visual Components: 
+        // 1. New array field content.visualComponents
+        // 2. Old object field content.visualComponent (wrap in array)
+        // 3. Fallback flat fields
+        visualComponents: mistake.content?.visualComponents || 
+                          (mistake.content?.visualComponent ? [mistake.content.visualComponent] : []) || 
+                          mistake.visualComponents || 
+                          (mistake.visualComponent ? [mistake.visualComponent] : []),
         imageData: mistake.originalImage?.url || mistake.imageData,
         answer: mistake.answer,
         explanation: mistake.explanation,
@@ -366,7 +382,10 @@ const RealApi: ApiService = {
         id: mistake._id || mistake.id,
         userId: mistake.userId,
         htmlContent: mistake.content?.html || mistake.htmlContent,
-        visualComponent: mistake.content?.visualComponent || mistake.visualComponent,
+        visualComponents: mistake.content?.visualComponents || 
+                          (mistake.content?.visualComponent ? [mistake.content.visualComponent] : []) || 
+                          mistake.visualComponents || 
+                          (mistake.visualComponent ? [mistake.visualComponent] : []),
         imageData: mistake.originalImage?.url || mistake.imageData,
         answer: mistake.answer,
         explanation: mistake.explanation,
@@ -399,7 +418,7 @@ const RealApi: ApiService = {
           answer: data.answer,
           explanation: data.explanation,
           tags: data.tags,
-          visualComponent: data.visualComponent,
+          visualComponents: data.visualComponents, // Pass the array
           originalMistakeId: data.originalMistakeId
         }]
       };

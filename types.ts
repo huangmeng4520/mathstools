@@ -1,3 +1,4 @@
+
 import { ReactNode } from 'react';
 
 export interface Question {
@@ -29,7 +30,7 @@ export interface ReviewResult {
 }
 
 // --- Visual Component Types ---
-export type VisualComponentType = 'clock' | 'block' | 'numberLine' | 'fraction' | 'geometry' | 'lineSegment' | 'none';
+export type VisualComponentType = 'clock' | 'block' | 'numberLine' | 'fraction' | 'geometry' | 'lineSegment' | 'emoji' | 'none';
 
 export interface VisualComponentData {
   type: VisualComponentType;
@@ -62,7 +63,7 @@ export interface MistakeRecord {
   
   // Content
   htmlContent: string;
-  visualComponent?: VisualComponentData;
+  visualComponents?: VisualComponentData[]; // Changed from single object to array
   answer: string;
   explanation: string;
   tags: string[];
@@ -83,7 +84,7 @@ export interface MistakeData {
   answer: string;
   explanation: string;
   tags: string[];
-  visualComponent?: VisualComponentData;
+  visualComponents?: VisualComponentData[]; // Changed from single object to array
   originalMistakeId?: string;
 }
 

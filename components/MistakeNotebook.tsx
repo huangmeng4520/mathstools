@@ -1,7 +1,4 @@
 
-
-
-
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { 
@@ -35,16 +32,18 @@ import { ClockVisualizer } from './ClockVisualizer';
 import { NumberLine } from './NumberLine';
 import { FractionVisualizer } from './FractionVisualizer';
 import { GeometryVisualizer } from './GeometryVisualizer';
+import { EmojiCounter } from './EmojiCounter';
 
 // --- CONSTANTS ---
 const VISUAL_COMPONENT_INSTRUCTION = `
-如果题目包含数学图形，请务必在 JSON 中返回 visualComponent 字段（不要在HTML中画图，而是返回组件参数）。
+如果题目包含数学图形，请务必在 JSON 中返回 visualComponents 字段（这是一个数组，支持多个图形）。
 支持的组件类型(type)及props参数：
 1. 时钟 (clock): { "type": "clock", "props": { "hour": number(0-12), "minute": number(0-59), "label": "string" } }
 2. 数轴 (numberLine): { "type": "numberLine", "props": { "min": number, "max": number, "step": number, "markedValues": [number], "label": "string" } }
 3. 分数图 (fraction): { "type": "fraction", "props": { "numerator": number, "denominator": number, "mode": "pie"|"bar", "label": "string" } }
 4. 几何图形 (geometry): { "type": "geometry", "props": { "shape": "rectangle"|"square"|"triangle"|"parallelogram"|"trapezoid", "width": number, "height": number, "topWidth": number(for trapezoid), "offset": number(for triangle/parallelogram), "showHeight": boolean, "labels": { "top": "string", "bottom": "string", "left": "string", "right": "string", "height": "string", "center": "string" } } }
 5. 线段图 (lineSegment): { "type": "lineSegment", "props": { "total": number|null, "totalLabel": "string", "segments": [{"value": number, "label": "string", "color": "string"}], "points": [{"label": "string", "at": "start"|"end"}] } }
+6. 物品计数 (emoji): { "type": "emoji", "props": { "icon": "string(emoji, e.g. 🍎, 🚗, ✏️)", "count": number, "label": "string" } }
 `;
 
 // --- MARKDOWN & MATH RENDERER ---
@@ -157,7 +156,7 @@ interface LineSegmentProps {
   label?: string;
 }
 
-const LineSegmentVisualizer: React.FC<LineSegmentProps> = ({
+const LineSegmentVisualizerLocal: React.FC<LineSegmentProps> = ({
   total,
   totalLabel,
   segments = [],
@@ -217,7 +216,8 @@ const LineSegmentVisualizer: React.FC<LineSegmentProps> = ({
          })}
       </svg>
       {label && (
-        <div className="mt-2 text-sm text-gray-500 font-bold">{label}</div>}
+        <div className="mt-2 text-sm text-gray-500 font-bold">{label}</div>
+      )}
     </div>
   );
 };
@@ -281,12 +281,22 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
     case 'lineSegment':
       return (
         <div className="my-4 flex justify-center animate-in fade-in zoom-in duration-300">
-            <LineSegmentVisualizer 
+            <LineSegmentVisualizerLocal 
                total={props.total}
                totalLabel={props.totalLabel}
                segments={props.segments}
                points={props.points}
                label={props.label}
+            />
+        </div>
+      );
+    case 'emoji':
+      return (
+        <div className="my-4 flex justify-center animate-in fade-in zoom-in duration-300">
+            <EmojiCounter 
+              icon={props.icon || "🍎"}
+              count={props.count || 1}
+              label={props.label}
             />
         </div>
       );
@@ -350,9 +360,11 @@ const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, 
                     className="w-full break-words prose prose-lg max-w-none text-gray-900 mb-4" 
                     dangerouslySetInnerHTML={{__html: mistake.htmlContent}} 
                   />
-                  {mistake.visualComponent && (
-                    <div className="w-full border-t border-dashed border-gray-200 pt-4">
-                      {renderVisualComponent(mistake.visualComponent)}
+                  {mistake.visualComponents && mistake.visualComponents.length > 0 && (
+                    <div className="w-full border-t border-dashed border-gray-200 pt-4 space-y-4">
+                      {mistake.visualComponents.map((vc, idx) => (
+                         <div key={idx}>{renderVisualComponent(vc)}</div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -463,7 +475,7 @@ interface MistakeNotebookProps {
   setPage?: (page: number) => void;
   limit?: number;
   totalCount?: number;
-  getReviewQueue?: () => Promise<MistakeRecord[]>;
+  getReviewQueue: () => Promise<MistakeRecord[]>;
 }
 
 export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({ 
@@ -484,19 +496,15 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [generatingVariationId, setGeneratingVariationId] = useState<string | null>(null);
   
-  // Print State
-  const [printQueue, setPrintQueue] = useState<MistakeRecord[]>([]);
-  const [isPrinting, setIsPrinting] = useState(false);
-
   // New entry state
   const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null);
   const [newImage, setNewImage] = useState<string | null>(null);
-  const [analyzedData, setAnalyzedData] = useState<Array<{html: string, answer: string, explanation: string, tags: string[], visualComponent?: VisualComponentData}>>([]);
+  const [analyzedData, setAnalyzedData] = useState<Array<{html: string, answer: string, explanation: string, tags: string[], visualComponents?: VisualComponentData[]}>>([]);
   const [retryPrompt, setRetryPrompt] = useState('');
   
   // Variation preview state
   const [showVariationPreview, setShowVariationPreview] = useState(false);
-  const [currentVariation, setCurrentVariation] = useState<{html: string, answer: string, explanation: string, tags: string[], visualComponent?: VisualComponentData} | null>(null);
+  const [currentVariation, setCurrentVariation] = useState<{html: string, answer: string, explanation: string, tags: string[], visualComponents?: VisualComponentData[]} | null>(null);
   const [currentOriginalMistake, setCurrentOriginalMistake] = useState<MistakeRecord | null>(null);
 
   // Cropping State
@@ -538,15 +546,15 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
   // --- REVIEW QUIZ GENERATION ---
   const handleStartReview = async () => {
-    // 1. Filter due mistakes
-    const dueMistakes = mistakes?.filter(m => Date.now() > m.nextReviewAt).slice(0, 5) || []; 
-    if (dueMistakes.length === 0) {
-      alert("当前没有需要复习的错题！");
-      return;
-    }
-
     setIsProcessing(true);
     try {
+      const dueMistakes = await getReviewQueue();
+
+      if (dueMistakes.length === 0) {
+        alert("当前没有需要复习的错题！");
+        return;
+      }
+
       const generatedQuestions: Question[] = [];
 
       for (const mistake of dueMistakes) {
@@ -610,9 +618,11 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                     className="w-full break-words prose prose-lg max-w-none text-gray-900 mb-4" 
                     dangerouslySetInnerHTML={{__html: mistake.htmlContent}} 
                   />
-                  {mistake.visualComponent && (
-                    <div className="w-full border-t border-dashed border-gray-200 pt-4">
-                      {renderVisualComponent(mistake.visualComponent)}
+                  {mistake.visualComponents && mistake.visualComponents.length > 0 && (
+                    <div className="w-full border-t border-dashed border-gray-200 pt-4 space-y-4">
+                       {mistake.visualComponents.map((vc, idx) => (
+                         <div key={idx}>{renderVisualComponent(vc)}</div>
+                       ))}
                     </div>
                   )}
                 </div>
@@ -655,10 +665,12 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
         JSON结构要求：
         {
           "html": "题目内容的 HTML（使用 Tailwind 类，字体大 text-2xl/3xl）。如果有可视化组件，请在 HTML 中预留位置或文字说明，组件将单独渲染。",
-          "visualComponent": {
-             "type": "clock | numberLine | fraction | geometry | none",
-             "props": { ... }
-          },
+          "visualComponents": [
+             {
+                "type": "clock | numberLine | fraction | geometry | none | emoji",
+                "props": { ... }
+             }
+          ],
           "answer": "新题答案",
           "explanation": "新题解析（Markdown格式，支持$$LaTeX$$公式）",
           "tags": ["标签1", "标签2"]
@@ -701,7 +713,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
       answer: currentVariation.answer,
       explanation: currentVariation.explanation,
       tags: [...currentVariation.tags, "变式练习"],
-      visualComponent: currentVariation.visualComponent,
+      visualComponents: currentVariation.visualComponents,
       originalMistakeId: currentOriginalMistake.id,
       imageData: currentOriginalMistake.imageData,
       nextReviewAt: Date.now(),
@@ -925,16 +937,18 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
         请分析这张小学数学错题图片。
         ${customInstruction ? `注意：${customInstruction}` : ''}
         
-        请识别题目内容、手写答案（如果有），并给出正确解答。
+        请识别题目内容、去除手写及批改内容，手写答案（如果有）分析错误原因，并给出正确解答及解题思路。
         
         必须返回纯 JSON 格式（不要Markdown代码块），结构如下：
         [
           {
             "html": "题目内容的 HTML（使用 Tailwind 类，字体大 text-2xl/3xl，重点数字加粗）。",
-            "visualComponent": {
-              "type": "clock | numberLine | fraction | geometry | none",
-              "props": { ... }
-            },
+            "visualComponents": [
+              {
+                "type": "clock | numberLine | fraction | geometry | none | emoji",
+                "props": { ... }
+              }
+            ],
             "answer": "正确答案",
             "explanation": "详细解析（Markdown格式，支持$$LaTeX$$公式）",
             "tags": ["标签1", "标签2"]
@@ -943,11 +957,12 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
         ${VISUAL_COMPONENT_INSTRUCTION}
         
-        如果图片包含多道题，请返回多个对象。
+        如果图片包含多道题，请返回多个对象，如果一题有多个问题时，题目内容公共部分需要复用。
         对于HTML内容：
         - 竖式计算请使用 <table> 布局对齐。
         - 确保文字颜色深色 (text-gray-900)。
         - 题目文字要完整。
+        - 解析时要用小学生能理解的方式。
       `;
 
       // Use helper with retry
@@ -991,7 +1006,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
         answer: d.answer,
         explanation: d.explanation,
         tags: d.tags,
-        visualComponent: d.visualComponent
+        visualComponents: d.visualComponents
     }));
 
     // If there's only one, standard format, but API supports bulk via separate call or array
@@ -1012,39 +1027,14 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   };
 
   // --- PRINTING ---
-  const handlePrint = async () => {
-    if (!getReviewQueue) {
-      alert("打印功能初始化失败，请刷新页面重试");
-      return;
-    }
-
-    setIsPrinting(true);
-    try {
-      const queue = await getReviewQueue();
-      if (!queue || queue.length === 0) {
-          alert("当前没有需要复习的错题！");
-          return;
-      }
-      setPrintQueue(queue);
-      
-      // Small delay to allow DOM to render the print view before printing
-      setTimeout(() => {
-        window.print();
-        setIsPrinting(false);
-        // Optional: clear print queue after print dialog closes? 
-        // Browser doesn't strictly tell us when print is done/cancelled.
-      }, 1000);
-    } catch (error) {
-      console.error("Print fetch error:", error);
-      alert("获取复习卷失败");
-      setIsPrinting(false);
-    }
+  const handlePrint = () => {
+    window.print();
   };
 
   // --- RENDERING ---
 
   return (
-    <div className="max-w-4xl mx-auto p-4 pb-24 print:p-0">
+    <>
       {/* Add print-specific global styles */}
       <style>{`
         @media print {
@@ -1055,451 +1045,440 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
           body {
             background: white;
           }
-          /* Hide everything else */
-          .print\\:hidden {
-            display: none !important;
-          }
         }
       `}</style>
       
-      {/* HEADER Actions */}
-      <div className="flex justify-between items-center mb-6 print:hidden">
-        <div>
-           <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-             <BookOpen className="w-6 h-6 text-purple-600" />
-             智能错题本
-           </h2>
-           <p className="text-gray-500 text-sm">已收录 {totalCount} 道错题，{mistakes?.filter(m => Date.now() > m.nextReviewAt).length} 道待复习</p>
+      {/* MAIN CONTENT */}
+      <div className="max-w-4xl mx-auto p-4 pb-24 print:hidden">
+        {/* HEADER Actions */}
+        <div className="flex justify-between items-center mb-6">
+          <div>
+             <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+               <BookOpen className="w-6 h-6 text-purple-600" />
+               智能错题本
+             </h2>
+             <p className="text-gray-500 text-sm">已收录 {totalCount} 道错题，{mistakes?.filter(m => Date.now() > m.nextReviewAt).length} 道待复习</p>
+          </div>
+          <div className="flex gap-2">
+             {view === 'list' && (
+               <>
+                 <button 
+                    onClick={handlePrint}
+                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl shadow-sm font-bold flex items-center gap-2 hover:bg-gray-200 transition-colors"
+                    title="打印本页错题"
+                 >
+                    <Printer className="w-5 h-5" />
+                    <span className="hidden md:inline">打印</span>
+                 </button>
+                 <button 
+                    onClick={handleStartReview}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-xl shadow-md font-bold flex items-center gap-2 hover:bg-indigo-700 transition-colors"
+                 >
+                    <Play className="w-5 h-5 fill-current" />
+                    开始复习
+                 </button>
+               </>
+             )}
+             <button 
+               onClick={() => setView(view === 'list' ? 'add' : 'list')}
+               className={`px-4 py-2 rounded-xl shadow-md font-bold flex items-center gap-2 transition-colors ${view === 'list' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+             >
+               {view === 'list' ? <><Plus className="w-5 h-5" /> 录入错题</> : '返回列表'}
+             </button>
+          </div>
         </div>
-        <div className="flex gap-2">
-           {view === 'list' && (
-             <>
-               <button 
-                  onClick={handlePrint}
-                  disabled={isPrinting}
-                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl shadow-sm font-bold flex items-center gap-2 hover:bg-gray-200 transition-colors disabled:opacity-50"
-                  title="打印复习卷"
-               >
-                  {isPrinting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Printer className="w-5 h-5" />}
-                  <span className="hidden md:inline">{isPrinting ? "准备中..." : "打印"}</span>
-               </button>
-               <button 
-                  onClick={handleStartReview}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl shadow-md font-bold flex items-center gap-2 hover:bg-indigo-700 transition-colors"
-               >
-                  <Play className="w-5 h-5 fill-current" />
-                  开始复习
-               </button>
-             </>
-           )}
-           <button 
-             onClick={() => setView(view === 'list' ? 'add' : 'list')}
-             className={`px-4 py-2 rounded-xl shadow-md font-bold flex items-center gap-2 transition-colors ${view === 'list' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-           >
-             {view === 'list' ? <><Plus className="w-5 h-5" /> 录入错题</> : '返回列表'}
-           </button>
-        </div>
-      </div>
 
-      {/* ERROR BANNER */}
-      {storageError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-6 flex items-center gap-2 print:hidden">
-          <AlertTriangle className="w-5 h-5" />
-          {storageError}
-        </div>
-      )}
+        {/* ERROR BANNER */}
+        {storageError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-6 flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5" />
+            {storageError}
+          </div>
+        )}
 
-      {/* VIEW: ADD MISTAKE */}
-      {view === 'add' && (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-300 print:hidden">
-          {!originalImageSrc ? (
-             <div className="border-4 border-dashed border-gray-200 rounded-2xl p-12 text-center hover:bg-blue-50 hover:border-blue-300 transition-colors cursor-pointer relative bg-white">
-               <input 
-                 ref={fileInputRef}
-                 type="file" 
-                 accept="image/*" 
-                 // capture="environment" // REMOVED: Allow gallery selection on mobile
-                 onChange={handleImageUpload} 
-                 className="absolute inset-0 opacity-0 cursor-pointer"
-               />
-               <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                 <Camera className="w-10 h-10" />
-               </div>
-               <h3 className="text-xl font-bold text-gray-800 mb-2">点击拍照或上传错题</h3>
-               <p className="text-gray-500">支持竖式、应用题、图形题</p>
-             </div>
-          ) : !newImage ? (
-             // CROP UI
-             <div className="bg-gray-900 rounded-xl overflow-hidden shadow-2xl relative select-none touch-none flex flex-col">
-               {/* HEADER BAR with INFO */}
-               <div className="bg-black/80 text-white px-4 py-3 flex justify-between items-center backdrop-blur-md shrink-0 border-b border-gray-700 z-20">
-                 <div className="flex items-center gap-2">
-                    <Crop className="w-4 h-4 text-blue-400" />
-                    <span className="font-bold text-sm">请框选题目区域</span>
-                 </div>
-                 <div className="font-mono text-xs text-gray-400">
-                    {cropRect && cropRect.w > 0 ? `${Math.round(cropRect.w)} × ${Math.round(cropRect.h)} px` : '拖拽创建选区'}
-                 </div>
-               </div>
-
-               <div 
-                 className="relative max-h-[70vh] overflow-hidden flex items-center justify-center bg-black/50"
-                 onMouseDown={handleCropMouseDown}
-                 onMouseMove={handleCropMouseMove}
-                 onMouseUp={handleCropMouseUp}
-                 onMouseLeave={handleCropMouseUp}
-                 onTouchStart={handleCropMouseDown}
-                 onTouchMove={handleCropMouseMove}
-                 onTouchEnd={handleCropMouseUp}
-               >
-                 <img 
-                   ref={imageRef}
-                   src={originalImageSrc} 
-                   className="max-w-full max-h-[70vh] object-contain pointer-events-none select-none" // prevent img drag
-                   alt="Original" 
-                   onLoad={() => {
-                     // Auto-init crop rect to center 80%? optional
-                   }}
+        {/* VIEW: ADD MISTAKE */}
+        {view === 'add' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+            {!originalImageSrc ? (
+               <div className="border-4 border-dashed border-gray-200 rounded-2xl p-12 text-center hover:bg-blue-50 hover:border-blue-300 transition-colors cursor-pointer relative bg-white">
+                 <input 
+                   ref={fileInputRef}
+                   type="file" 
+                   accept="image/*" 
+                   // capture="environment" // REMOVED: Allow gallery selection on mobile
+                   onChange={handleImageUpload} 
+                   className="absolute inset-0 opacity-0 cursor-pointer"
                  />
-                 {/* Dim Overlay */}
-                 <div className="absolute inset-0 bg-black/50 pointer-events-none" />
-                 
-                 {/* Crop Box */}
-                 {cropRect && cropRect.w > 0 && (
-                    <div 
-                      className="absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.6)] group"
-                      style={{
-                        left: cropRect.x,
-                        top: cropRect.y,
-                        width: cropRect.w,
-                        height: cropRect.h
-                      }}
-                    >
-                      {/* Grid Lines */}
-                      <div className="absolute inset-0 pointer-events-none opacity-40">
-                         <div className="absolute top-1/3 left-0 right-0 h-px bg-white/50"></div>
-                         <div className="absolute top-2/3 left-0 right-0 h-px bg-white/50"></div>
-                         <div className="absolute left-1/3 top-0 bottom-0 w-px bg-white/50"></div>
-                         <div className="absolute left-2/3 top-0 bottom-0 w-px bg-white/50"></div>
-                      </div>
-
-                      {/* Handles */}
-                      <div className="absolute -top-1.5 -left-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-nw-resize z-20 hover:scale-125 transition-transform" />
-                      <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-ne-resize z-20 hover:scale-125 transition-transform" />
-                      <div className="absolute -bottom-1.5 -left-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-sw-resize z-20 hover:scale-125 transition-transform" />
-                      <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-se-resize z-20 hover:scale-125 transition-transform" />
-                      
-                      {/* Move Hint */}
-                      <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity pointer-events-none">
-                         <Move className="w-8 h-8 text-white drop-shadow-md" />
-                      </div>
-                    </div>
-                 )}
+                 <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                   <Camera className="w-10 h-10" />
+                 </div>
+                 <h3 className="text-xl font-bold text-gray-800 mb-2">点击拍照或上传错题</h3>
+                 <p className="text-gray-500">支持竖式、应用题、图形题</p>
                </div>
-               
-               <div className="p-4 bg-gray-800 flex justify-between items-center shrink-0 border-t border-gray-700">
-                  <button 
-                    onClick={handleReset}
-                    className="text-white hover:text-gray-300 font-bold px-4 py-2"
-                  >
-                    取消
-                  </button>
-                  <div className="flex gap-3">
+            ) : !newImage ? (
+               // CROP UI
+               <div className="bg-gray-900 rounded-xl overflow-hidden shadow-2xl relative select-none touch-none flex flex-col">
+                 {/* HEADER BAR with INFO */}
+                 <div className="bg-black/80 text-white px-4 py-3 flex justify-between items-center backdrop-blur-md shrink-0 border-b border-gray-700 z-20">
+                   <div className="flex items-center gap-2">
+                      <Crop className="w-4 h-4 text-blue-400" />
+                      <span className="font-bold text-sm">请框选题目区域</span>
+                   </div>
+                   <div className="font-mono text-xs text-gray-400">
+                      {cropRect && cropRect.w > 0 ? `${Math.round(cropRect.w)} × ${Math.round(cropRect.h)} px` : '拖拽创建选区'}
+                   </div>
+                 </div>
+
+                 <div 
+                   className="relative max-h-[70vh] overflow-hidden flex items-center justify-center bg-black/50"
+                   onMouseDown={handleCropMouseDown}
+                   onMouseMove={handleCropMouseMove}
+                   onMouseUp={handleCropMouseUp}
+                   onMouseLeave={handleCropMouseUp}
+                   onTouchStart={handleCropMouseDown}
+                   onTouchMove={handleCropMouseMove}
+                   onTouchEnd={handleCropMouseUp}
+                 >
+                   <img 
+                     ref={imageRef}
+                     src={originalImageSrc} 
+                     className="max-w-full max-h-[70vh] object-contain pointer-events-none select-none" // prevent img drag
+                     alt="Original" 
+                     onLoad={() => {
+                       // Auto-init crop rect to center 80%? optional
+                     }}
+                   />
+                   {/* Dim Overlay */}
+                   <div className="absolute inset-0 bg-black/50 pointer-events-none" />
+                   
+                   {/* Crop Box */}
+                   {cropRect && cropRect.w > 0 && (
+                      <div 
+                        className="absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.6)] group"
+                        style={{
+                          left: cropRect.x,
+                          top: cropRect.y,
+                          width: cropRect.w,
+                          height: cropRect.h
+                        }}
+                      >
+                        {/* Grid Lines */}
+                        <div className="absolute inset-0 pointer-events-none opacity-40">
+                           <div className="absolute top-1/3 left-0 right-0 h-px bg-white/50"></div>
+                           <div className="absolute top-2/3 left-0 right-0 h-px bg-white/50"></div>
+                           <div className="absolute left-1/3 top-0 bottom-0 w-px bg-white/50"></div>
+                           <div className="absolute left-2/3 top-0 bottom-0 w-px bg-white/50"></div>
+                        </div>
+
+                        {/* Handles */}
+                        <div className="absolute -top-1.5 -left-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-nw-resize z-20 hover:scale-125 transition-transform" />
+                        <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-ne-resize z-20 hover:scale-125 transition-transform" />
+                        <div className="absolute -bottom-1.5 -left-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-sw-resize z-20 hover:scale-125 transition-transform" />
+                        <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-se-resize z-20 hover:scale-125 transition-transform" />
+                        
+                        {/* Move Hint */}
+                        <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity pointer-events-none">
+                           <Move className="w-8 h-8 text-white drop-shadow-md" />
+                        </div>
+                      </div>
+                   )}
+                 </div>
+                 
+                 <div className="p-4 bg-gray-800 flex justify-between items-center shrink-0 border-t border-gray-700">
                     <button 
-                       onClick={() => analyzeImage(originalImageSrc)} // Skip crop
-                       className="px-4 py-2 text-gray-400 hover:text-white text-sm"
+                      onClick={handleReset}
+                      className="text-white hover:text-gray-300 font-bold px-4 py-2"
                     >
-                       不剪裁直接识别
+                      取消
                     </button>
-                    <button 
-                       onClick={confirmCrop}
-                       className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-blue-900/50"
-                    >
-                       <Check className="w-5 h-5" />
-                       确认剪裁
-                    </button>
+                    <div className="flex gap-3">
+                      <button 
+                         onClick={() => analyzeImage(originalImageSrc)} // Skip crop
+                         className="px-4 py-2 text-gray-400 hover:text-white text-sm"
+                      >
+                         不剪裁直接识别
+                      </button>
+                      <button 
+                         onClick={confirmCrop}
+                         className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-blue-900/50"
+                      >
+                         <Check className="w-5 h-5" />
+                         确认剪裁
+                      </button>
+                    </div>
+                 </div>
+               </div>
+            ) : (
+               // ANALYSIS PREVIEW
+               <div className="space-y-6">
+                  <div className="flex gap-4 items-start">
+                     <div className="w-1/3 bg-gray-100 rounded-xl p-2 border border-gray-200">
+                        <img src={newImage} className="w-full rounded-lg shadow-sm mb-2" alt="Cropped" />
+                        <button 
+                          onClick={handleReCrop}
+                          className="w-full py-2 bg-white border border-gray-300 text-gray-600 rounded-lg text-sm font-bold hover:bg-gray-50 flex items-center justify-center gap-2"
+                        >
+                          <Crop className="w-4 h-4" />
+                          重新剪裁
+                        </button>
+                     </div>
+                     
+                     <div className="flex-1 space-y-4">
+                        {isProcessing ? (
+                           <div className="h-64 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col items-center justify-center gap-4">
+                              <RefreshCw className="w-10 h-10 animate-spin text-blue-500" />
+                              <div className="text-center">
+                                 <p className="font-bold text-gray-800 text-lg">AI 老师正在分析...</p>
+                                 <p className="text-gray-500 text-sm">识别手写字迹 • 解析算理 • 提取图形</p>
+                              </div>
+                           </div>
+                        ) : analyzedData.length > 0 ? (
+                           <div className="space-y-4">
+                              {analyzedData.map((data, idx) => (
+                                 <div key={idx} className="bg-white rounded-xl shadow-lg border border-purple-100 overflow-hidden">
+                                    <div className="bg-purple-50 px-4 py-2 border-b border-purple-100 flex justify-between">
+                                       <span className="font-bold text-purple-700 text-sm">识别结果 {analyzedData.length > 1 ? `#${idx+1}` : ''}</span>
+                                    </div>
+                                    <div className="p-6">
+                                       <div 
+                                         className="prose max-w-none text-gray-900 mb-4 text-xl"
+                                         dangerouslySetInnerHTML={{__html: data.html}} 
+                                       />
+                                       {data.visualComponents && data.visualComponents.map((vc, i) => (
+                                          <div key={i}>{renderVisualComponent(vc)}</div>
+                                       ))}
+                                       <div className="bg-green-50 p-4 rounded-lg border border-green-100 text-sm text-gray-700">
+                                          <div className="font-bold text-green-800 mb-1 flex items-center gap-2">
+                                            <span>Answer:</span>
+                                            <MarkdownRenderer content={data.answer} />
+                                          </div>
+                                          <div><MarkdownRenderer content={data.explanation} /></div>
+                                       </div>
+                                    </div>
+                                 </div>
+                              ))}
+                              
+                              {/* REGENERATE SECTION */}
+                              <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                 <h4 className="font-bold text-gray-700 mb-2 flex items-center gap-2">
+                                   <AlertTriangle className="w-4 h-4 text-orange-500" />
+                                   识别不准确？
+                                 </h4>
+                                 <div className="flex gap-2">
+                                    <input 
+                                      type="text" 
+                                      value={retryPrompt}
+                                      onChange={(e) => setRetryPrompt(e.target.value)}
+                                      placeholder="输入提示，例如：'这是除法不是加法' 或 '数字是 15'"
+                                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                    />
+                                    <button 
+                                      onClick={() => analyzeImage(newImage, retryPrompt)}
+                                      className="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-bold rounded-lg hover:bg-gray-50 text-sm whitespace-nowrap"
+                                    >
+                                      重新生成
+                                    </button>
+                                 </div>
+                              </div>
+
+                              <div className="flex gap-3 pt-2">
+                                 <button 
+                                   onClick={handleReset}
+                                   className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors"
+                                 >
+                                   放弃
+                                 </button>
+                                 <button 
+                                   onClick={saveNewMistake}
+                                   className="flex-[2] py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-colors flex items-center justify-center gap-2"
+                                 >
+                                   <CheckCircle2 className="w-5 h-5" />
+                                   确认并保存错题
+                                 </button>
+                              </div>
+                           </div>
+                        ) : (
+                           <div className="bg-red-50 text-red-600 p-4 rounded-xl border border-red-100 text-center">
+                              识别失败，请尝试重新剪裁或上传更清晰的图片。
+                           </div>
+                        )}
+                     </div>
                   </div>
                </div>
-             </div>
-          ) : (
-             // ANALYSIS PREVIEW
-             <div className="space-y-6">
-                <div className="flex gap-4 items-start">
-                   <div className="w-1/3 bg-gray-100 rounded-xl p-2 border border-gray-200">
-                      <img src={newImage} className="w-full rounded-lg shadow-sm mb-2" alt="Cropped" />
+            )}
+          </div>
+        )}
+
+        {/* VIEW: LIST */}
+        {view === 'list' && (
+          <div className="space-y-6">
+             {isLoading && mistakes?.length === 0 ? (
+                <div className="text-center py-20 text-gray-400">
+                  <RefreshCw className="w-10 h-10 animate-spin mx-auto mb-4" />
+                  加载中...
+                </div>
+             ) : mistakes?.length === 0 ? (
+                <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-300">
+                   <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <BookOpen className="w-10 h-10 text-gray-400" />
+                   </div>
+                   <h3 className="text-xl font-bold text-gray-800 mb-2">错题本是空的</h3>
+                   <p className="text-gray-500 mb-6">快去录入第一道错题吧，AI 帮你分析！</p>
+                   <button 
+                     onClick={() => setView('add')}
+                     className="px-6 py-3 bg-blue-600 text-white font-bold rounded-full shadow-lg hover:bg-blue-700 transition-transform hover:scale-105"
+                   >
+                     立即录入
+                   </button>
+                </div>
+             ) : (
+               <>
+                 <div className="grid gap-6">
+                   {mistakes?.map(mistake => (
+                     <MistakeCard 
+                       key={mistake.id} 
+                       mistake={mistake} 
+                       onDelete={deleteMistake}
+                       onReview={reviewMistake}
+                       onGenerateVariation={handleGenerateVariation}
+                       isGenerating={generatingVariationId === mistake.id}
+                     />
+                   ))}
+                 </div>
+                 
+                 {/* PAGINATION */}
+                 {totalPages > 1 && setPage && (
+                   <div className="flex items-center justify-center gap-4 mt-8">
                       <button 
-                        onClick={handleReCrop}
-                        className="w-full py-2 bg-white border border-gray-300 text-gray-600 rounded-lg text-sm font-bold hover:bg-gray-50 flex items-center justify-center gap-2"
+                         onClick={() => setPage(Math.max(1, page - 1))}
+                         disabled={page === 1 || isLoading}
+                         className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 border border-gray-200 bg-white"
                       >
-                        <Crop className="w-4 h-4" />
-                        重新剪裁
+                         <ChevronLeft className="w-5 h-5" />
+                      </button>
+                      
+                      <span className="text-sm font-bold text-gray-600">
+                         第 {page} 页 / 共 {totalPages} 页
+                      </span>
+
+                      <button 
+                         onClick={() => setPage(Math.min(totalPages, page + 1))}
+                         disabled={page === totalPages || isLoading}
+                         className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 border border-gray-200 bg-white"
+                      >
+                         <ChevronRight className="w-5 h-5" />
                       </button>
                    </div>
-                   
-                   <div className="flex-1 space-y-4">
-                      {isProcessing ? (
-                         <div className="h-64 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col items-center justify-center gap-4">
-                            <RefreshCw className="w-10 h-10 animate-spin text-blue-500" />
-                            <div className="text-center">
-                               <p className="font-bold text-gray-800 text-lg">AI 老师正在分析...</p>
-                               <p className="text-gray-500 text-sm">识别手写字迹 • 解析算理 • 提取图形</p>
-                            </div>
-                         </div>
-                      ) : analyzedData.length > 0 ? (
-                         <div className="space-y-4">
-                            {analyzedData.map((data, idx) => (
-                               <div key={idx} className="bg-white rounded-xl shadow-lg border border-purple-100 overflow-hidden">
-                                  <div className="bg-purple-50 px-4 py-2 border-b border-purple-100 flex justify-between">
-                                     <span className="font-bold text-purple-700 text-sm">识别结果 {analyzedData.length > 1 ? `#${idx+1}` : ''}</span>
-                                  </div>
-                                  <div className="p-6">
-                                     <div 
-                                       className="prose max-w-none text-gray-900 mb-4 text-xl"
-                                       dangerouslySetInnerHTML={{__html: data.html}} 
-                                     />
-                                     {renderVisualComponent(data.visualComponent)}
-                                     <div className="bg-green-50 p-4 rounded-lg border border-green-100 text-sm text-gray-700">
-                                        <div className="font-bold text-green-800 mb-1 flex items-center gap-2">
-                                          <span>Answer:</span>
-                                          <MarkdownRenderer content={data.answer} />
-                                        </div>
-                                        <div><MarkdownRenderer content={data.explanation} /></div>
-                                     </div>
-                                  </div>
-                               </div>
-                            ))}
-                            
-                            {/* REGENERATE SECTION */}
-                            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                               <h4 className="font-bold text-gray-700 mb-2 flex items-center gap-2">
-                                 <AlertTriangle className="w-4 h-4 text-orange-500" />
-                                 识别不准确？
-                               </h4>
-                               <div className="flex gap-2">
-                                  <input 
-                                    type="text" 
-                                    value={retryPrompt}
-                                    onChange={(e) => setRetryPrompt(e.target.value)}
-                                    placeholder="输入提示，例如：'这是除法不是加法' 或 '数字是 15'"
-                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                  />
-                                  <button 
-                                    onClick={() => analyzeImage(newImage, retryPrompt)}
-                                    className="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-bold rounded-lg hover:bg-gray-50 text-sm whitespace-nowrap"
-                                  >
-                                    重新生成
-                                  </button>
-                               </div>
-                            </div>
+                 )}
+               </>
+             )}
+          </div>
+        )}
 
-                            <div className="flex gap-3 pt-2">
-                               <button 
-                                 onClick={handleReset}
-                                 className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors"
-                               >
-                                 放弃
-                               </button>
-                               <button 
-                                 onClick={saveNewMistake}
-                                 className="flex-[2] py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-colors flex items-center justify-center gap-2"
-                               >
-                                 <CheckCircle2 className="w-5 h-5" />
-                                 确认并保存错题
-                               </button>
-                            </div>
-                         </div>
-                      ) : (
-                         <div className="bg-red-50 text-red-600 p-4 rounded-xl border border-red-100 text-center">
-                            识别失败，请尝试重新剪裁或上传更清晰的图片。
-                         </div>
-                      )}
+        {/* MODAL: VARIATION PREVIEW */}
+        {showVariationPreview && currentVariation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+             <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+                <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 flex justify-between items-center text-white shrink-0">
+                   <h3 className="font-bold text-lg flex items-center gap-2">
+                      <Wand2 className="w-5 h-5" />
+                      AI 生成变式练习
+                   </h3>
+                   <button onClick={() => setShowVariationPreview(false)} className="hover:bg-white/20 p-1 rounded-full transition-colors">
+                      <XCircle className="w-6 h-6" />
+                   </button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
+                   <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+                      <div className="flex gap-2 mb-4">
+                         {currentVariation.tags.map(t => (
+                            <span key={t} className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded border border-purple-100">{t}</span>
+                         ))}
+                      </div>
+                      <div 
+                         className="prose max-w-none text-gray-900 text-xl"
+                         dangerouslySetInnerHTML={{__html: currentVariation.html}} 
+                      />
+                      {currentVariation.visualComponents && currentVariation.visualComponents.map((vc, i) => (
+                         <div key={i}>{renderVisualComponent(vc)}</div>
+                      ))}
+                   </div>
+
+                   <div className="bg-green-50 p-5 rounded-xl border border-green-100">
+                      <div className="font-bold text-green-800 mb-2 text-sm uppercase tracking-wide">参考答案</div>
+                      <div className="text-gray-900 font-medium mb-3">
+                        <MarkdownRenderer content={currentVariation.answer} />
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        <MarkdownRenderer content={currentVariation.explanation} />
+                      </div>
                    </div>
                 </div>
+
+                <div className="p-4 bg-white border-t border-gray-200 flex justify-end gap-3 shrink-0">
+                   <button 
+                     onClick={() => setShowVariationPreview(false)}
+                     className="px-5 py-2.5 text-gray-600 font-bold hover:bg-gray-100 rounded-lg transition-colors"
+                   >
+                     取消
+                   </button>
+                   <button 
+                     onClick={handleSaveVariation}
+                     className="px-6 py-2.5 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 shadow-lg shadow-purple-200 transition-colors flex items-center gap-2"
+                   >
+                     <Save className="w-4 h-4" />
+                     保存到错题本
+                   </button>
+                </div>
              </div>
-          )}
-        </div>
-      )}
-
-      {/* VIEW: LIST */}
-      {view === 'list' && (
-        <div className="space-y-6 print:hidden">
-           {isLoading && mistakes?.length === 0 ? (
-              <div className="text-center py-20 text-gray-400">
-                <RefreshCw className="w-10 h-10 animate-spin mx-auto mb-4" />
-                加载中...
-              </div>
-           ) : mistakes?.length === 0 ? (
-              <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-300">
-                 <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <BookOpen className="w-10 h-10 text-gray-400" />
-                 </div>
-                 <h3 className="text-xl font-bold text-gray-800 mb-2">错题本是空的</h3>
-                 <p className="text-gray-500 mb-6">快去录入第一道错题吧，AI 帮你分析！</p>
-                 <button 
-                   onClick={() => setView('add')}
-                   className="px-6 py-3 bg-blue-600 text-white font-bold rounded-full shadow-lg hover:bg-blue-700 transition-transform hover:scale-105"
-                 >
-                   立即录入
-                 </button>
-              </div>
-           ) : (
-             <>
-               <div className="grid gap-6">
-                 {mistakes?.map(mistake => (
-                   <MistakeCard 
-                     key={mistake.id} 
-                     mistake={mistake} 
-                     onDelete={deleteMistake}
-                     onReview={reviewMistake}
-                     onGenerateVariation={handleGenerateVariation}
-                     isGenerating={generatingVariationId === mistake.id}
-                   />
-                 ))}
-               </div>
-               
-               {/* PAGINATION */}
-               {totalPages > 1 && setPage && (
-                 <div className="flex items-center justify-center gap-4 mt-8">
-                    <button 
-                       onClick={() => setPage(Math.max(1, page - 1))}
-                       disabled={page === 1 || isLoading}
-                       className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 border border-gray-200 bg-white"
-                    >
-                       <ChevronLeft className="w-5 h-5" />
-                    </button>
-                    
-                    <span className="text-sm font-bold text-gray-600">
-                       第 {page} 页 / 共 {totalPages} 页
-                    </span>
-
-                    <button 
-                       onClick={() => setPage(Math.min(totalPages, page + 1))}
-                       disabled={page === totalPages || isLoading}
-                       className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 border border-gray-200 bg-white"
-                    >
-                       <ChevronRight className="w-5 h-5" />
-                    </button>
-                 </div>
-               )}
-             </>
-           )}
-        </div>
-      )}
-
-      {/* MODAL: VARIATION PREVIEW */}
-      {showVariationPreview && currentVariation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 print:hidden">
-           <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
-              <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 flex justify-between items-center text-white shrink-0">
-                 <h3 className="font-bold text-lg flex items-center gap-2">
-                    <Wand2 className="w-5 h-5" />
-                    AI 生成变式练习
-                 </h3>
-                 <button onClick={() => setShowVariationPreview(false)} className="hover:bg-white/20 p-1 rounded-full transition-colors">
-                    <XCircle className="w-6 h-6" />
-                 </button>
-              </div>
-              
-              <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
-                 <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
-                    <div className="flex gap-2 mb-4">
-                       {currentVariation.tags.map(t => (
-                          <span key={t} className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded border border-purple-100">{t}</span>
-                       ))}
-                    </div>
-                    <div 
-                       className="prose max-w-none text-gray-900 text-xl"
-                       dangerouslySetInnerHTML={{__html: currentVariation.html}} 
-                    />
-                    {renderVisualComponent(currentVariation.visualComponent)}
-                 </div>
-
-                 <div className="bg-green-50 p-5 rounded-xl border border-green-100">
-                    <div className="font-bold text-green-800 mb-2 text-sm uppercase tracking-wide">参考答案</div>
-                    <div className="text-gray-900 font-medium mb-3">
-                      <MarkdownRenderer content={currentVariation.answer} />
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      <MarkdownRenderer content={currentVariation.explanation} />
-                    </div>
-                 </div>
-              </div>
-
-              <div className="p-4 bg-white border-t border-gray-200 flex justify-end gap-3 shrink-0">
-                 <button 
-                   onClick={() => setShowVariationPreview(false)}
-                   className="px-5 py-2.5 text-gray-600 font-bold hover:bg-gray-100 rounded-lg transition-colors"
-                 >
-                   取消
-                 </button>
-                 <button 
-                   onClick={handleSaveVariation}
-                   className="px-6 py-2.5 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 shadow-lg shadow-purple-200 transition-colors flex items-center gap-2"
-                 >
-                   <Save className="w-4 h-4" />
-                   保存到错题本
-                 </button>
-              </div>
-           </div>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       {/* PRINT VIEW (HIDDEN ON SCREEN) */}
       <div className="hidden print:block bg-white text-black p-8">
-         <div className="flex justify-between items-center border-b-2 border-black pb-4 mb-8">
-            <div>
-                <h1 className="text-3xl font-bold mb-1">智能错题本 - 复习卷</h1>
-                <p className="text-sm text-gray-500">生成时间：{new Date().toLocaleDateString()}</p>
-            </div>
-            <div className="border border-black p-4 w-40 h-20 flex flex-col justify-between">
-                <span className="text-xs font-bold uppercase">Score</span>
-                <div className="border-b border-black w-full"></div>
-            </div>
+         <div className="text-center mb-8 border-b-2 border-black pb-4">
+            <h1 className="text-3xl font-bold mb-2">智能错题本 - 复习卷</h1>
+            <p className="text-sm text-gray-500">生成时间：{new Date().toLocaleDateString()}</p>
          </div>
          
-         {printQueue.length === 0 && !isPrinting ? (
-            <div className="text-center text-gray-500">当前没有需复习的错题</div>
+         {mistakes?.length === 0 ? (
+            <div className="text-center text-gray-500">没有错题可打印</div>
          ) : (
-            printQueue.map((m, i) => (
-               <div key={m.id} className="mb-12 break-inside-avoid">
+            mistakes.map((m, i) => (
+               <div key={m.id} className="mb-8 break-inside-avoid border-b border-dashed border-gray-300 pb-6">
                   <div className="flex justify-between items-start mb-4">
-                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-black text-white flex items-center justify-center font-bold text-lg">
-                            {i + 1}
-                        </div>
+                     <div className="flex items-center gap-2">
+                        <span className="text-xl font-bold mr-2">{i + 1}.</span>
                         <div className="flex gap-2">
                            {m.tags.map(t => (
-                              <span key={t} className="text-xs font-bold border border-black px-2 py-0.5 rounded-full">{t}</span>
+                              <span key={t} className="text-xs font-bold border border-gray-400 px-2 py-0.5 rounded">{t}</span>
                            ))}
                         </div>
                      </div>
                   </div>
                   
                   {/* Content */}
-                  <div className="pl-11">
+                  <div className="pl-8 mb-6">
                      <div 
                         className="prose prose-lg max-w-none text-black mb-4" 
                         dangerouslySetInnerHTML={{__html: m.htmlContent}} 
                      />
-                     {m.visualComponent && (
-                        <div className="my-4 border-none flex justify-start">
-                           {renderVisualComponent(m.visualComponent)}
+                     {m.visualComponents && m.visualComponents.map((vc, idx) => (
+                        <div key={idx} className="my-4 border-none">
+                           {renderVisualComponent(vc)}
                         </div>
-                     )}
-                     {m.imageData && (
-                       <div className="mt-4 max-w-[300px] opacity-50 print:opacity-80">
-                          <img src={m.imageData} alt="Original" className="max-h-32 object-contain border border-gray-300" />
-                       </div>
-                     )}
+                     ))}
+
                   </div>
 
                   {/* Space for working out */}
-                  <div className="mt-8 h-40 border-b border-dashed border-gray-300"></div>
+                  <div className="h-32"></div>
                </div>
             ))
          )}
       </div>
-
-    </div>
+    </>
   );
 };
