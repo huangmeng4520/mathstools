@@ -197,7 +197,8 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
   const props = visual.props || {};
 
   // NOTE: Added print:animate-none to prevent animations from hiding content during print
-  const commonClasses = "my-4 flex justify-center animate-in fade-in zoom-in duration-300 print:animate-none print:my-2";
+  // Added print:scale-75 print:origin-top-left to reduce size on paper
+  const commonClasses = "my-4 flex justify-center animate-in fade-in zoom-in duration-300 print:animate-none print:my-2 print:scale-75 print:origin-top-left";
 
   switch (visual.type) {
     case 'clock':
@@ -1390,11 +1391,11 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
       const { items } = await api.getMistakes(1, 1000); 
       setPrintMistakes(items);
       
-      // Allow DOM to update
+      // Allow DOM to update and images to load
       setTimeout(() => {
         window.print();
         setIsPreparingPrint(false);
-      }, 500);
+      }, 1000);
     } catch (e) {
       console.error("Failed to prepare print data", e);
       alert("无法获取全部数据用于打印");
@@ -1416,6 +1417,8 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
           body {
             background: white;
             color: black;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
           /* Ensure backgrounds (colors/images) are printed */
           * {
@@ -1916,8 +1919,8 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                            )}
                            
                            {/* Workspace for student */}
-                           <div className="mt-4 pt-4 border-t border-dotted border-gray-300">
-                              <p className="text-[10px] text-gray-400 mb-8">解题区：</p>
+                           <div className="mt-4 pt-4 border-t-2 border-dotted border-gray-300 h-32">
+                              <p className="text-[10px] text-gray-400 mb-1">解题区：</p>
                            </div>
                         </div>
                     </div>

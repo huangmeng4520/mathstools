@@ -14,7 +14,57 @@ const STORAGE_KEY = 'math_master_mistakes_v2';
 const TOKEN_KEY = 'math_master_token';
 const MOCK_DELAY = 500;
 
-// --- Interface ---
+// --- MOCK DATA (From mistakedata.json) ---
+const MOCK_DATA = {
+    "data": [
+        {
+            "_id": "692995ae29104ef7e4f099ab",
+            "userId": "6929669e29104ef7e4f098d7",
+            "originalMistakeId": "692973dd29104ef7e4f09978",
+            "originalImage": {
+                "url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/、lCVtNlrc5s7D0n9KvWC1eJniQdKOL09CcMK7KVDfZW8jLbsdx4IdKf/T0I/On8rxFhRfE+22FGoYH8HetEqTJAUD/",
+                "fileId": "local-1764320693680",
+                "_id": "6929678729104ef7e4f09904"
+            },
+            "content": {
+                "visualComponent": {
+                    "type": "math"
+                },
+                "html": "<p class=\"text-gray-900 text-2xl/3xl mb-4\">8岁的小红和爸爸、妈妈三人去吃自助火锅，有下面两种付款方式，但不能一起使，用哪种付款方式更省钱？省多少钱？</p><div class=\"border border-gray-300 rounded-lg p-4\"><div class=\"grid grid-cols-2 gap-4 text-gray-900 text-2xl/3xl font-bold mb-2\"><div>前台付款</div><div>网络团购</div></div><div class=\"grid grid-cols-2 gap-4 text-gray-900 text-2xl/3xl\"><div><p>成人: <span class=\"font-bold\">73</span>元/人</p><p>儿童: <span class=\"font-bold\">48</span>元/人</p></div><div><p><span class=\"font-bold\">62</span>元/人</p></div></div></div>",
+                "visualComponents": [
+                    {
+                        "type": "math"
+                    }
+                ],
+                "_id": "6929678729104ef7e4f09905"
+            },
+            "answer": "网络团购更省钱，可以节省8元。",
+            "explanation": "### 题目分析\n小红今年6.8岁，所以她属于儿童。爸爸妈妈是成人，所以是2个成人和1个儿童。\n题目要求比较两种付款方式的费用，并计算哪种更省钱，省多少钱。\n\n### 解题步骤\n**1. 计算前台付款的总费用：**\n*   有2位成人（爸爸、妈妈），每位成人73元。\n*   有1位儿童（小红），每位儿童48元。\n*   前台付款总费用 = 成人费用 + 儿童费用\n    $$ = (2 \\times 73) + (1 \\times 48) $$\n    $$ = 146 + 48 $$\n    $$ = 194 \\text{ (元)} $$\n\n**2. 计算网络团购的总费用：**\n*   网络团购是“62元/人”，并且题目说明两种付款方式不能一起使用，这意味着如果选择网络团购，所有3个人（爸爸、妈妈、小红）都按这个价格付费。\n*   网络团购总费用 = 总人数 \\times 每人价格\n    $$ = 3 \\times 62 $$\n    $$ = 186 \\text{ (元)} $$\n\n**3. 比较两种付款方式的费用：**\n*   前台付款：194元\n*   网络团购：186元\n*   因为 $$186 < 194$$，所以网络团购更省钱。\n\n**4. 计算节省的金额：**\n*   节省金额 = 前台付款费用 - 网络团购费用\n    $$ = 194 - 186 $$\n    $$ = 8 \\text{ (元)} $$\n\n### 错误原因分析\n1.  **计算错误：** 小朋友在计算网络团购的总费用时，写的是 $$2 \\times 62 + 48 = 124 + 48 = 192$$。这里有两个错误：\n    *   首先，$$124 + 48$$ 实际结果是 $$172$$，而不是 $$192$$。这是一个计算错误。\n    *   其次，对“网络团购62元/人”的理解可能存在偏差。题目明确说明“但不能一起使”，意思是只能选择一种付款方式。如果选择网络团购，通常意味着所有人都按团购价62元/人计算，而不是将成人按团购价，儿童按前台价（这是混合使用了两种方式，与题意不符）。所以，正确的计算应该是 $$3 \\times 62 = 186$$ 元。\n\n2.  **结论错误：** 由于计算错误，小朋友的最后比较 $$194元 > 192元$$ 也是基于错误的结果。虽然从错误结果看，网络团购（192元）也比前台付款（194元）便宜，但实际金额和节省的金额都计算错了。",
+            "tags": [
+                "四则运算",
+                "比较大小",
+                "应用题",
+                "购物计算"
+            ],
+            "status": "active",
+            "srs": {
+                "nextReviewAt": "2025-11-28T09:12:39.980Z",
+                "reviewCount": 0,
+                "interval": 1,
+                "easeFactor": 2.5,
+                "masteryLevel": "new",
+                "_id": "6929678729104ef7e4f09906"
+            },
+            "createdAt": "2025-11-28T09:12:39.982Z",
+            "updatedAt": "2025-11-28T09:12:39.982Z",
+            "__v": 0
+        }
+    ],
+    "total": 10,
+    "page": 1,
+    "limit": 5
+}
+
 interface PaginatedResponse {
   items: MistakeRecord[];
   total: number;
@@ -134,11 +184,43 @@ export const auth = {
   }
 };
 
+// Helper to transform backend data to frontend MistakeRecord
+const transformBackendRecord = (mistake: any): MistakeRecord => ({
+    id: mistake._id || mistake.id,
+    userId: mistake.userId || 'mock-user-1',
+    htmlContent: mistake.content?.html || mistake.htmlContent,
+    // Normalize Visual Components: 
+    // 1. New array field content.visualComponents
+    // 2. Old object field content.visualComponent (wrap in array)
+    // 3. Fallback flat fields
+    visualComponents: mistake.content?.visualComponents || 
+                      (mistake.content?.visualComponent ? [mistake.content.visualComponent] : []) || 
+                      mistake.visualComponents || 
+                      (mistake.visualComponent ? [mistake.visualComponent] : []),
+    imageData: mistake.originalImage?.url || mistake.imageData,
+    answer: mistake.answer,
+    explanation: mistake.explanation,
+    tags: mistake.tags || [],
+    status: mistake.status || 'active',
+    createdAt: new Date(mistake.createdAt).getTime(),
+    updatedAt: new Date(mistake.updatedAt).getTime(),
+    nextReviewAt: mistake.srs?.nextReviewAt ? new Date(mistake.srs.nextReviewAt).getTime() : Date.now(),
+    reviewCount: mistake.srs?.reviewCount || 0,
+    masteryLevel: mistake.srs?.masteryLevel || 'new'
+});
+
 // --- Mock Implementation (LocalStorage) ---
 const MockApi: ApiService = {
   getMistakes: async (page = 1, limit = 5) => {
     return new Promise((resolve) => {
       setTimeout(() => {
+        // Initialize mock data if empty
+        const existing = localStorage.getItem(STORAGE_KEY);
+        if (!existing) {
+             const seedData = MOCK_DATA.data.map(transformBackendRecord);
+             localStorage.setItem(STORAGE_KEY, JSON.stringify(seedData));
+        }
+
         const json = localStorage.getItem(STORAGE_KEY);
         let allMistakes: any[] = json ? JSON.parse(json) : [];
         
@@ -146,17 +228,14 @@ const MockApi: ApiService = {
         const activeMistakes = allMistakes.filter(m => m.status !== 'deleted');
         
         // 2. Sort by nextReviewAt asc (urgent first) or createdAt desc
+        // For better mock experience, let's sort by created desc so new items appear first
         activeMistakes.sort((a, b) => b.createdAt - a.createdAt);
 
         // 3. Pagination
         const total = activeMistakes.length;
         const startIndex = (page - 1) * limit;
         const endIndex = startIndex + limit;
-        const items = activeMistakes.slice(startIndex, endIndex).map(m => ({
-           ...m,
-           // Normalize legacy data
-           visualComponents: m.visualComponents || (m.visualComponent ? [m.visualComponent] : [])
-        }));
+        const items = activeMistakes.slice(startIndex, endIndex);
 
         resolve({ items, total });
       }, MOCK_DELAY);
@@ -349,54 +428,14 @@ const RealApi: ApiService = {
 
     const items = rawItems
       .filter((mistake: any) => mistake.status !== 'deleted') // Extra safety
-      .map((mistake: any) => ({
-        id: mistake._id || mistake.id,
-        userId: mistake.userId,
-        htmlContent: mistake.content?.html || mistake.htmlContent,
-        // Normalize Visual Components: 
-        // 1. New array field content.visualComponents
-        // 2. Old object field content.visualComponent (wrap in array)
-        // 3. Fallback flat fields
-        visualComponents: mistake.content?.visualComponents || 
-                          (mistake.content?.visualComponent ? [mistake.content.visualComponent] : []) || 
-                          mistake.visualComponents || 
-                          (mistake.visualComponent ? [mistake.visualComponent] : []),
-        imageData: mistake.originalImage?.url || mistake.imageData,
-        answer: mistake.answer,
-        explanation: mistake.explanation,
-        tags: mistake.tags || [],
-        status: mistake.status,
-        createdAt: new Date(mistake.createdAt).getTime(),
-        updatedAt: new Date(mistake.updatedAt).getTime(),
-        nextReviewAt: mistake.srs?.nextReviewAt ? new Date(mistake.srs.nextReviewAt).getTime() : Date.now(),
-        reviewCount: mistake.srs?.reviewCount || 0,
-        masteryLevel: mistake.srs?.masteryLevel || 'new'
-      }));
+      .map(transformBackendRecord);
       
     return { items, total };
   },
 
   getReviewQueue: async () => {
     const rawItems: any[] = await fetchWithAuth('/api/mistakes/review-queue');
-    return rawItems.map((mistake: any) => ({
-        id: mistake._id || mistake.id,
-        userId: mistake.userId,
-        htmlContent: mistake.content?.html || mistake.htmlContent,
-        visualComponents: mistake.content?.visualComponents || 
-                          (mistake.content?.visualComponent ? [mistake.content.visualComponent] : []) || 
-                          mistake.visualComponents || 
-                          (mistake.visualComponent ? [mistake.visualComponent] : []),
-        imageData: mistake.originalImage?.url || mistake.imageData,
-        answer: mistake.answer,
-        explanation: mistake.explanation,
-        tags: mistake.tags || [],
-        status: mistake.status,
-        createdAt: new Date(mistake.createdAt).getTime(),
-        updatedAt: new Date(mistake.updatedAt).getTime(),
-        nextReviewAt: mistake.srs?.nextReviewAt ? new Date(mistake.srs.nextReviewAt).getTime() : Date.now(),
-        reviewCount: mistake.srs?.reviewCount || 0,
-        masteryLevel: mistake.srs?.masteryLevel || 'new'
-    }));
+    return rawItems.map(transformBackendRecord);
   },
   
   addMistake: async (data) => {
