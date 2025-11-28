@@ -606,6 +606,7 @@ interface MistakeCardProps {
 
 const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, onGenerateVariation, isGenerating }) => {
   const isDue = Date.now() > mistake.nextReviewAt;
+  const isMastered = mistake.masteryLevel === 'mastered';
   const [showAnswer, setShowAnswer] = useState(false);
   const [showFullImage, setShowFullImage] = useState(false);
 
@@ -632,7 +633,13 @@ const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, 
            ))}
          </div>
          <div className="flex items-center gap-3">
-            {isDue && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded font-bold animate-pulse">需复习</span>}
+            {isMastered && (
+              <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded font-bold flex items-center gap-1 border border-green-200">
+                 <CheckCircle2 className="w-3 h-3" />
+                 已掌握
+              </span>
+            )}
+            {!isMastered && isDue && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded font-bold animate-pulse">需复习</span>}
             <button onClick={handleDelete} className="text-gray-400 hover:text-red-500 p-1 hover:bg-red-50 rounded">
               <Trash2 className="w-5 h-5" />
             </button>
