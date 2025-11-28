@@ -530,11 +530,12 @@ interface MistakeCardProps {
   mistake: MistakeRecord;
   onDelete: (id: string) => void;
   onReview: (id: string, success: boolean) => void;
+  onEdit: (mistake: MistakeRecord) => void;
   onGenerateVariation: (mistake: MistakeRecord) => void;
   isGenerating?: boolean;
 }
 
-const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, onGenerateVariation, isGenerating }) => {
+const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, onEdit, onGenerateVariation, isGenerating }) => {
   const isDue = Date.now() > mistake.nextReviewAt;
   const isMastered = mistake.masteryLevel === 'mastered';
   const [showAnswer, setShowAnswer] = useState(false);
@@ -570,7 +571,10 @@ const MistakeCard: React.FC<MistakeCardProps> = ({ mistake, onDelete, onReview, 
               </span>
             )}
             {!isMastered && isDue && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded font-bold animate-pulse">需复习</span>}
-            <button onClick={handleDelete} className="text-gray-400 hover:text-red-500 p-1 hover:bg-red-50 rounded">
+            <button onClick={() => onEdit(mistake)} className="text-gray-400 hover:text-blue-500 p-1 hover:bg-blue-50 rounded" title="编辑">
+              <Edit className="w-5 h-5" />
+            </button>
+            <button onClick={handleDelete} className="text-gray-400 hover:text-red-500 p-1 hover:bg-red-50 rounded" title="删除">
               <Trash2 className="w-5 h-5" />
             </button>
          </div>
@@ -694,6 +698,7 @@ interface MistakeNotebookProps {
   isLoading: boolean;
   addMistake: (record: AddMistakePayload) => void;
   deleteMistake: (id: string) => void;
+  updateMistake: (id: string, updates: Partial<MistakeRecord>) => void;
   reviewMistake: (id: string, success: boolean) => void;
   onStartReview: (questions: Question[]) => void;
   // Pagination Props
@@ -710,6 +715,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   isLoading, 
   addMistake, 
   deleteMistake, 
+  updateMistake,
   reviewMistake,
   onStartReview,
   page = 1,
@@ -737,6 +743,9 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   const [showVariationPreview, setShowVariationPreview] = useState(false);
   const [currentVariation, setCurrentVariation] = useState<{html: string, answer: string, explanation: string, tags: string[], visualComponents?: VisualComponentData[]} | null>(null);
   const [currentOriginalMistake, setCurrentOriginalMistake] = useState<MistakeRecord | null>(null);
+
+  // Edit Existing Mistake State
+  const [editingMistake, setEditingMistake] = useState<MistakeRecord | null>(null);
 
   // Print State
   const [isPreparingPrint, setIsPreparingPrint] = useState(false);
@@ -1383,6 +1392,25 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
     setIsEditingVariation(false);
   };
 
+  // --- EDIT EXISTING MISTAKE ---
+  const handleUpdateMistake = (updatedData: any) => {
+    if (!editingMistake) return;
+
+    // Construct update payload, mapping editor format back to MistakeRecord structure if needed
+    // MistakeEditor returns an object similar to the 'data' prop it received.
+    // We need to ensure we pass the correct fields to updateMistake.
+    const updates: Partial<MistakeRecord> = {
+        htmlContent: updatedData.html,
+        answer: updatedData.answer,
+        explanation: updatedData.explanation,
+        tags: updatedData.tags,
+        visualComponents: updatedData.visualComponents
+    };
+
+    updateMistake(editingMistake.id, updates);
+    setEditingMistake(null);
+  };
+
   // --- PRINTING ---
   const handlePrint = async () => {
     setIsPreparingPrint(true);
@@ -1751,6 +1779,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                        mistake={mistake} 
                        onDelete={deleteMistake}
                        onReview={reviewMistake}
+                       onEdit={setEditingMistake}
                        onGenerateVariation={handleGenerateVariation}
                        isGenerating={generatingVariationId === mistake.id}
                      />
@@ -1783,6 +1812,37 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                  )}
                </>
              )}
+          </div>
+        )}
+
+        {/* MODAL: EDIT MISTAKE */}
+        {editingMistake && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+             <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex justify-between items-center text-white shrink-0">
+                   <h3 className="font-bold text-lg flex items-center gap-2">
+                      <Edit className="w-5 h-5" />
+                      编辑错题
+                   </h3>
+                   <button onClick={() => setEditingMistake(null)} className="hover:bg-white/20 p-1 rounded-full transition-colors">
+                      <XCircle className="w-6 h-6" />
+                   </button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
+                    <MistakeEditor 
+                      data={{
+                        html: editingMistake.htmlContent,
+                        answer: editingMistake.answer,
+                        explanation: editingMistake.explanation,
+                        tags: editingMistake.tags,
+                        visualComponents: editingMistake.visualComponents
+                      }}
+                      onSave={handleUpdateMistake}
+                      onCancel={() => setEditingMistake(null)}
+                    />
+                </div>
+             </div>
           </div>
         )}
 

@@ -75,6 +75,23 @@ export function useMistakeManager() {
     }
   };
 
+  const updateMistake = async (id: string, updates: Partial<MistakeRecord>) => {
+    try {
+      // Optimistic update (optional, but safer to wait for response or just update local list if API returns full object)
+      // Here we wait for API response
+      const updatedRecord = await api.updateMistake(id, updates);
+      
+      setMistakes(prev => prev.map(m => m.id === id ? { ...m, ...updatedRecord } : m));
+    } catch (e: any) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === 'Session expired') return;
+      
+      console.error("Update Error:", e);
+      setError("更新错题失败");
+      throw e; // Re-throw to let UI know
+    }
+  };
+
   const deleteMistake = async (id: string) => {
     // Optimistic Update is harder with pagination, let's just do standard request then refresh
     // But for better UX, we can try to filter locally first
@@ -118,6 +135,7 @@ export function useMistakeManager() {
     isLoading,
     error,
     addMistake,
+    updateMistake,
     deleteMistake,
     reviewMistake,
     refresh: () => fetchMistakes(page),

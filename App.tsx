@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { QUESTIONS } from './constants';
 import { QuizState, Question, ReviewResult, User } from './types';
@@ -453,6 +452,7 @@ export default function App() {
                isLoading={mistakeManager.isLoading}
                addMistake={mistakeManager.addMistake}
                deleteMistake={mistakeManager.deleteMistake}
+               updateMistake={mistakeManager.updateMistake}
                reviewMistake={mistakeManager.reviewMistake}
                onStartReview={handleStartReviewGame}
                page={mistakeManager.page}
