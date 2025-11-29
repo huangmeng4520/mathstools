@@ -113,3 +113,11 @@ export interface LineSegmentBrace {
   label: string;
   position?: 'top' | 'bottom';
 }
+
+export interface GridItem {
+  shape?: 'circle' | 'square' | 'triangle' | 'none';
+  content?: string; // Emoji or text inside
+  label?: string;   // Text below the item (e.g. number)
+  color?: string;   // Border/Fill color
+  visible?: boolean;
+}

@@ -63,9 +63,11 @@ const VISUAL_COMPONENT_INSTRUCTION = `
        "braces": [{ "rowIndex": 1, "start": 0, "end": 3, "label": "?米", "position": "bottom" }] 
      }
 6. 物品计数 (emoji): { "type": "emoji", "props": { "icon": "string(emoji, e.g. 🍎, 🚗, ✏️)", "count": number, "label": "string" } }
-7. 阵列/矩阵 (grid): { "type": "grid", "props": { "rows": number, "cols": number, "itemType": "circle"|"square"|"emoji", "icon": "string", "label": "string", "data": [number] } }
-   - "data" 是可选的一维数组 (0/1)，用于定义不规则矩阵。1=显示，0=隐藏。长度应等于 rows*cols。
-   - 示例 (2行2列，缺右下角): "data": [1, 1, 1, 0]
+7. 阵列/矩阵/卡片 (grid): { "type": "grid", "props": { "rows": number, "cols": number, "itemType": "circle"|"square"|"emoji", "icon": "string", "label": "string", "data": Array } }
+   - "data" 是一维数组。
+   - 简单模式: [1, 1, 0, 1] (1=显示, 0=隐藏)。
+   - 高级模式 (用于分类/卡片题): 数组包含对象 { "shape": "triangle|circle|square", "content": "🐰", "label": "①" }。
+   - 示例 (分类统计题): { "rows": 2, "cols": 5, "data": [{ "shape": "triangle", "content": "🐰", "label": "①" }, { "shape": "circle", "content": "🐱", "label": "②" }] }
 8. 骰子/正方体 (die): { "type": "die", "props": { "topValue": number(1-6), "leftValue": number(1-6), "rightValue": number(1-6), "size": number, "label": "string" } }
    - 注意：'leftValue' 对应正方体正面的数字，'rightValue' 对应右侧面，'topValue' 对应顶面。
 `;
