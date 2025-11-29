@@ -75,7 +75,7 @@ interface ApiService {
   getReviewQueue: () => Promise<MistakeRecord[]>;
   addMistake: (mistake: AddMistakePayload) => Promise<MistakeRecord | MistakeRecord[]>;
   deleteMistake: (id: string) => Promise<void>;
-  updateMistake: (id: string, updates: Partial<MistakeRecord>) => Promise<MistakeRecord>;
+  updateMistake: (id: string, updates: any) => Promise<MistakeRecord>;
   reviewMistake: (id: string, success: boolean) => Promise<MistakeRecord>;
 }
 
@@ -327,7 +327,27 @@ const MockApi: ApiService = {
       }, MOCK_DELAY);
     });
   },
-  updateMistake: async (id, updates) => { return Promise.resolve({} as any); },
+  updateMistake: async (id, updates) => {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+         const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+         const updated = stored.map((m: MistakeRecord) => {
+           if (m.id === id) {
+             const cleanUpdates = { ...updates };
+             // Map 'html' back to 'htmlContent' for local storage compatibility
+             if (cleanUpdates.html) {
+                 cleanUpdates.htmlContent = cleanUpdates.html;
+                 delete cleanUpdates.html;
+             }
+             return { ...m, ...cleanUpdates, updatedAt: Date.now() };
+           }
+           return m;
+         });
+         localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+         resolve(updated.find((m: MistakeRecord) => m.id === id));
+      }, MOCK_DELAY);
+    });
+  },
   reviewMistake: async (id, success) => { 
     return new Promise((resolve) => {
       setTimeout(() => {

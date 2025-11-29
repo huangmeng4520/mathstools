@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { 
@@ -44,6 +43,7 @@ import { GeometryVisualizer } from './GeometryVisualizer';
 import { EmojiCounter } from './EmojiCounter';
 import { GridVisualizer } from './GridVisualizer';
 import { LineSegmentVisualizer } from './LineSegmentVisualizer';
+import { DieVisualizer } from './DieVisualizer';
 
 // --- CONSTANTS ---
 const VISUAL_COMPONENT_INSTRUCTION = `
@@ -53,9 +53,21 @@ const VISUAL_COMPONENT_INSTRUCTION = `
 2. 数轴 (numberLine): { "type": "numberLine", "props": { "min": number, "max": number, "step": number, "markedValues": [number], "label": "string" } }
 3. 分数图 (fraction): { "type": "fraction", "props": { "numerator": number, "denominator": number, "mode": "pie"|"bar", "label": "string" } }
 4. 几何图形 (geometry): { "type": "geometry", "props": { "shape": "rectangle"|"square"|"triangle"|"parallelogram"|"trapezoid", "width": number, "height": number, "topWidth": number(for trapezoid), "offset": number(for triangle/parallelogram), "showHeight": boolean, "labels": { "top": "string", "bottom": "string", "left": "string", "right": "string", "height": "string", "center": "string" } } }
-5. 线段图 (lineSegment): { "type": "lineSegment", "props": { "total": number|null, "totalLabel": "string", "segments": [{"value": number, "label": "string", "color": "string"}], "points": [{"label": "string", "at": "start"|"end"|"junction"|"custom", "segmentIndex": number(for junction), "position": number(0-1 for custom)}] } }
+5. 线段图 (lineSegment): { "type": "lineSegment", "props": { "rows": [{ "label": "string(Row Label)", "segments": [{ "value": number, "label": "string", "color": "string", "type": "solid|dotted" }] }], "braces": [{ "rowIndex": number, "start": number, "end": number, "label": "string", "position": "top|bottom" }] } }
+   - 注意：lineSegment 现在支持多行对比。'value' 是相对长度。'braces' 用于标记总数或部分。
+   - 示例 (海豚2米，鲨鱼更长): 
+     { "rows": [ 
+         { "label": "海豚", "segments": [{ "value": 2, "label": "2米" }] }, 
+         { "label": "鲨鱼", "segments": [{ "value": 2, "label": "2米" }, { "value": 1, "label": "+1", "type": "dotted" }] } 
+       ], 
+       "braces": [{ "rowIndex": 1, "start": 0, "end": 3, "label": "?米", "position": "bottom" }] 
+     }
 6. 物品计数 (emoji): { "type": "emoji", "props": { "icon": "string(emoji, e.g. 🍎, 🚗, ✏️)", "count": number, "label": "string" } }
-7. 阵列/矩阵 (grid): { "type": "grid", "props": { "rows": number, "cols": number, "itemType": "circle"|"square"|"emoji", "icon": "string", "label": "string" } }
+7. 阵列/矩阵 (grid): { "type": "grid", "props": { "rows": number, "cols": number, "itemType": "circle"|"square"|"emoji", "icon": "string", "label": "string", "data": [number] } }
+   - "data" 是可选的一维数组 (0/1)，用于定义不规则矩阵。1=显示，0=隐藏。长度应等于 rows*cols。
+   - 示例 (2行2列，缺右下角): "data": [1, 1, 1, 0]
+8. 骰子/正方体 (die): { "type": "die", "props": { "topValue": number(1-6), "leftValue": number(1-6), "rightValue": number(1-6), "size": number, "label": "string" } }
+   - 注意：'leftValue' 对应正方体正面的数字，'rightValue' 对应右侧面，'topValue' 对应顶面。
 `;
 
 // --- MARKDOWN & MATH RENDERER ---
@@ -253,10 +265,12 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
       return (
         <div className={commonClasses}>
             <LineSegmentVisualizer 
+               rows={props.rows}
+               braces={props.braces}
+               // backward compatibility
                total={props.total}
                totalLabel={props.totalLabel}
                segments={props.segments}
-               points={props.points}
                label={props.label}
             />
         </div>
@@ -279,6 +293,19 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
               cols={props.cols}
               itemType={props.itemType}
               icon={props.icon}
+              label={props.label}
+              data={props.data}
+            />
+        </div>
+      );
+    case 'die':
+      return (
+        <div className={commonClasses}>
+            <DieVisualizer 
+              topValue={props.topValue}
+              leftValue={props.leftValue}
+              rightValue={props.rightValue}
+              size={props.size}
               label={props.label}
             />
         </div>
@@ -698,7 +725,7 @@ interface MistakeNotebookProps {
   isLoading: boolean;
   addMistake: (record: AddMistakePayload) => void;
   deleteMistake: (id: string) => void;
-  updateMistake: (id: string, updates: Partial<MistakeRecord>) => void;
+  updateMistake: (id: string, updates: any) => void;
   reviewMistake: (id: string, success: boolean) => void;
   onStartReview: (questions: Question[]) => void;
   // Pagination Props
@@ -948,7 +975,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
           "html": "题目内容的 HTML（使用 Tailwind 类，字体大 text-2xl/3xl）。如果有可视化组件，请在 HTML 中预留位置或文字说明，组件将单独渲染。",
           "visualComponents": [
              {
-                "type": "clock | numberLine | fraction | geometry | none | emoji | grid",
+                "type": "clock | numberLine | fraction | geometry | none | emoji | grid | die",
                 "props": { ... }
              }
           ],
@@ -1031,7 +1058,8 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
            // @ts-ignore
            const heic2anyModule = await import('heic2any');
            // Handle ESM default export compatibility
-           const heic2any = heic2anyModule.default || heic2anyModule;
+           // Fix: cast to any to avoid "expression is not callable" error due to complex import type
+           const heic2any = (heic2anyModule.default || heic2anyModule) as any;
            
            // Read file as ArrayBuffer to ensure we have the complete raw bytes
            const arrayBuffer = await file.arrayBuffer();
@@ -1299,7 +1327,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
             "html": "题目内容的 HTML（使用 Tailwind 类，字体大 text-2xl/3xl，重点数字加粗）。",
             "visualComponents": [
               {
-                "type": "clock | numberLine | fraction | geometry | none | emoji | grid",
+                "type": "clock | numberLine | fraction | geometry | none | emoji | grid | die",
                 "props": { ... }
               }
             ],
@@ -1396,11 +1424,10 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
   const handleUpdateMistake = (updatedData: any) => {
     if (!editingMistake) return;
 
-    // Construct update payload, mapping editor format back to MistakeRecord structure if needed
-    // MistakeEditor returns an object similar to the 'data' prop it received.
-    // We need to ensure we pass the correct fields to updateMistake.
-    const updates: Partial<MistakeRecord> = {
-        htmlContent: updatedData.html,
+    // Construct update payload
+    // Use 'html' instead of 'htmlContent' to match backend expectation
+    const updates = {
+        html: updatedData.html,
         answer: updatedData.answer,
         explanation: updatedData.explanation,
         tags: updatedData.tags,
@@ -1621,7 +1648,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
                       </button>
                       <button 
                          onClick={confirmCrop}
-                         className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-blue-900/50"
+                         className="px-6 py-2 bg-blue-600 hover:bg-blue-50 text-white rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-blue-900/50"
                       >
                          <Check className="w-5 h-5" />
                          确认剪裁

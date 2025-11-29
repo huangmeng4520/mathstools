@@ -1,99 +1,205 @@
-import React from 'react';
 
-export interface LineSegmentProps {
-  total?: number | null;
+import React from 'react';
+import { LineSegmentRow, LineSegmentBrace } from '../types';
+
+export interface LineSegmentVisualizerProps {
+  rows?: LineSegmentRow[];
+  braces?: LineSegmentBrace[];
+  // Backward compatibility props (optional)
+  total?: number;
   totalLabel?: string;
   segments?: Array<{ value: number; label?: string; color?: string }>;
-  points?: Array<{ label: string; at: 'start' | 'end' | 'custom' | 'junction'; position?: number; segmentIndex?: number }>;
-  width?: number;
   label?: string;
 }
 
-export const LineSegmentVisualizer: React.FC<LineSegmentProps> = ({
-  total,
-  totalLabel,
-  segments = [],
-  points = [],
-  width = 300,
-  label
-}) => {
-  const totalValue = segments.reduce((sum, s) => sum + s.value, 0) || total || 100;
-  const safeTotal = Math.max(totalValue, 1);
-  const height = 60;
-  const startX = 20;
-  const y = 30;
+export const LineSegmentVisualizer: React.FC<LineSegmentVisualizerProps> = (props) => {
+  // --- 1. Normalize Data ---
+  // Convert old single-line props to new multi-row structure if needed
+  let dataRows: LineSegmentRow[] = props.rows || [];
+  let dataBraces: LineSegmentBrace[] = props.braces || [];
+
+  // Backward compatibility for old 'lineSegment' usage
+  if (dataRows.length === 0 && props.segments) {
+    dataRows = [{
+      label: props.label,
+      segments: props.segments.map(s => ({
+        value: s.value,
+        label: s.label,
+        color: s.color,
+        type: 'solid'
+      }))
+    }];
+    if (props.totalLabel) {
+      // Add a total brace for the old style
+      const totalVal = props.segments.reduce((a, b) => a + b.value, 0);
+      dataBraces.push({
+        rowIndex: 0,
+        start: 0,
+        end: totalVal,
+        label: props.totalLabel,
+        position: 'bottom'
+      });
+    }
+  }
+
+  if (dataRows.length === 0) return null;
+
+  // --- 2. Calculate Scaling ---
+  // Find the maximum total value across all rows to determine scale
+  const rowTotals = dataRows.map(r => r.segments.reduce((sum, s) => sum + s.value, 0));
+  const maxTotal = Math.max(...rowTotals);
+  // Avoid division by zero
+  const safeMaxTotal = maxTotal > 0 ? maxTotal : 1;
+
+  // --- 3. Layout Constants ---
+  const SVG_WIDTH = 300;
+  const ROW_HEIGHT = 40;
+  const ROW_GAP = 50; // Space between rows
+  const LABEL_WIDTH = 60; // Space reserved for left labels
+  const DRAW_WIDTH = SVG_WIDTH - LABEL_WIDTH - 20; // 20px padding right
+  const START_X = LABEL_WIDTH + 10;
+  const BRACE_HEIGHT = 15;
   
-  let currentX = startX;
-  
+  // Calculate Scale Factor: how many pixels per unit value
+  const scale = DRAW_WIDTH / safeMaxTotal;
+
+  // Calculate total SVG height
+  const svgHeight = dataRows.length * (ROW_HEIGHT + ROW_GAP) + 40; // Padding
+
+  // --- 4. Helper: Brace Path Generator ---
+  const drawBrace = (x1: number, x2: number, y: number, direction: 'top' | 'bottom') => {
+    const w = x2 - x1;
+    const h = direction === 'bottom' ? BRACE_HEIGHT : -BRACE_HEIGHT;
+    
+    // A curly brace path
+    // Starts at x1,y. Curves to middle. Point at middle. Curves to x2,y.
+    // Using Quadratic Bezier curves (Q)
+    return `M ${x1} ${y} 
+            Q ${x1} ${y + h/2} ${x1 + Math.min(10, w/4)} ${y + h/2} 
+            L ${x1 + w/2 - Math.min(10, w/4)} ${y + h/2} 
+            Q ${x1 + w/2} ${y + h/2} ${x1 + w/2} ${y + h} 
+            Q ${x1 + w/2} ${y + h/2} ${x1 + w/2 + Math.min(10, w/4)} ${y + h/2} 
+            L ${x2 - Math.min(10, w/4)} ${y + h/2} 
+            Q ${x2} ${y + h/2} ${x2} ${y}`;
+  };
+
   return (
-    <div className="flex flex-col items-center justify-center p-4 bg-white rounded-xl shadow-sm border border-gray-100 w-fit mx-auto my-4 overflow-visible">
-      <svg width={width + 40} height={height + (totalLabel ? 30 : 0)} style={{overflow: 'visible'}}>
-         {/* Segments */}
-         {segments.length > 0 ? (
-           segments.map((seg, idx) => {
-             const segWidth = (seg.value / safeTotal) * width;
-             const el = (
-               <g key={idx}>
-                 <rect x={currentX} y={y} width={segWidth} height={20} fill={seg.color || '#3b82f6'} stroke="white" strokeWidth="1" />
-                 {seg.label && (
-                   <text x={currentX + segWidth/2} y={y + 14} textAnchor="middle" fill="white" fontSize="10" fontWeight="bold">
-                     {seg.label}
-                   </text>
-                 )}
-               </g>
-             );
-             currentX += segWidth;
-             return el;
-           })
-         ) : (
-             <line x1={startX} y1={y+10} x2={startX + width} y2={y+10} stroke="#374151" strokeWidth="2" />
-         )}
-         
-         {/* Total Brace */}
-         {totalLabel && (
-            <g>
-               <path d={`M ${startX} ${y+25} Q ${startX} ${y+35} ${startX+5} ${y+35} L ${startX + width/2 - 5} ${y+35} Q ${startX + width/2} ${y+35} ${startX + width/2} ${y+40} Q ${startX + width/2} ${y+35} ${startX + width/2 + 5} ${y+35} L ${startX + width - 5} ${y+35} Q ${startX + width} ${y+35} ${startX + width} ${y+25}`} fill="none" stroke="#6b7280" strokeWidth="1.5" />
-               <text x={startX + width/2} y={y+55} textAnchor="middle" className="text-xs font-bold fill-gray-600">{totalLabel}</text>
+    <div className="flex flex-col items-center justify-center p-4 bg-white rounded-xl shadow-sm border border-gray-100 w-full max-w-md mx-auto my-4 overflow-x-auto">
+      <svg width={SVG_WIDTH} height={svgHeight} style={{overflow: 'visible'}}>
+        
+        {/* --- Render Rows --- */}
+        {dataRows.map((row, rowIndex) => {
+          const rowY = rowIndex * (ROW_HEIGHT + ROW_GAP) + 30; // Start Y position for this row
+          let currentX = START_X;
+
+          return (
+            <g key={`row-${rowIndex}`}>
+              {/* Row Label */}
+              {row.label && (
+                <text 
+                  x={START_X - 10} 
+                  y={rowY + ROW_HEIGHT / 2} 
+                  textAnchor="end" 
+                  dominantBaseline="middle" 
+                  className="text-xs font-bold fill-gray-600"
+                  style={{ fontSize: '12px' }}
+                >
+                  {row.label}
+                </text>
+              )}
+
+              {/* Segments */}
+              {row.segments.map((seg, segIndex) => {
+                const segWidth = seg.value * scale;
+                const isDotted = seg.type === 'dotted' || seg.type === 'dashed';
+                
+                const rectEl = (
+                  <g key={`seg-${rowIndex}-${segIndex}`}>
+                    {/* The Bar */}
+                    <rect 
+                      x={currentX} 
+                      y={rowY} 
+                      width={Math.max(segWidth, 1)} 
+                      height={ROW_HEIGHT} 
+                      fill={isDotted ? 'white' : (seg.color || '#3b82f6')} 
+                      stroke={seg.color || '#3b82f6'}
+                      strokeWidth="2"
+                      strokeDasharray={isDotted ? "4 2" : "none"}
+                      rx="4"
+                    />
+                    
+                    {/* Segment Label (Inside) */}
+                    {seg.label && (
+                      <text 
+                        x={currentX + segWidth / 2} 
+                        y={rowY + ROW_HEIGHT / 2} 
+                        textAnchor="middle" 
+                        dominantBaseline="middle" 
+                        className="text-xs font-bold"
+                        style={{ 
+                          fontSize: '10px', 
+                          fill: isDotted ? '#374151' : 'white',
+                          textShadow: isDotted ? 'none' : '0px 1px 2px rgba(0,0,0,0.3)' 
+                        }}
+                      >
+                        {seg.label}
+                      </text>
+                    )}
+                  </g>
+                );
+
+                // Advance X
+                const prevX = currentX;
+                currentX += segWidth;
+                
+                // Add separator line if not the last segment and not dotted transition
+                const separator = segIndex < row.segments.length - 1 ? (
+                   <line x1={currentX} y1={rowY} x2={currentX} y2={rowY + ROW_HEIGHT} stroke="white" strokeWidth="1" />
+                ) : null;
+
+                return (
+                  <React.Fragment key={segIndex}>
+                    {rectEl}
+                    {separator}
+                  </React.Fragment>
+                );
+              })}
+              
+              {/* Alignment Lines to next row (Optional, if needed for complex comparisons) */}
             </g>
-         )}
-         
-         {/* Points labels */}
-         {points.map((p, i) => {
-             let px = startX;
-             let textAnchor: "start" | "middle" | "end" | "inherit" = "middle";
+          );
+        })}
 
-             if (p.at === 'end') {
-               px = startX + width;
-               textAnchor = "start"; // Shift slightly right/start align to avoid overlap if close to middle
-             } else if (p.at === 'start') {
-               px = startX;
-               textAnchor = "end"; // Shift slightly left
-             } else if (p.at === 'custom' && typeof p.position === 'number') {
-               px = startX + (p.position * width);
-             } else if (p.at === 'junction' && typeof p.segmentIndex === 'number') {
-               // Calculate position at end of segment index
-               let valSum = 0;
-               for (let k = 0; k <= p.segmentIndex && k < segments.length; k++) {
-                 valSum += segments[k].value;
-               }
-               px = startX + (valSum / safeTotal) * width;
-             }
+        {/* --- Render Braces --- */}
+        {dataBraces.map((brace, idx) => {
+          const rowY = brace.rowIndex * (ROW_HEIGHT + ROW_GAP) + 30;
+          const startX = START_X + brace.start * scale;
+          const endX = START_X + brace.end * scale;
+          
+          const braceY = brace.position === 'top' ? rowY - 5 : rowY + ROW_HEIGHT + 5;
+          const textY = brace.position === 'top' ? braceY - BRACE_HEIGHT - 5 : braceY + BRACE_HEIGHT + 12;
 
-             // Adjust alignment for endpoints to stay cleaner
-             if (px <= startX + 5) textAnchor = "start"; 
-             else if (px >= startX + width - 5) textAnchor = "end";
+          return (
+            <g key={`brace-${idx}`}>
+              <path 
+                d={drawBrace(startX, endX, braceY, brace.position || 'bottom')} 
+                fill="none" 
+                stroke="#4b5563" 
+                strokeWidth="1.5" 
+              />
+              <text 
+                x={startX + (endX - startX) / 2} 
+                y={textY} 
+                textAnchor="middle" 
+                className="text-xs font-bold fill-gray-700"
+              >
+                {brace.label}
+              </text>
+            </g>
+          );
+        })}
 
-             return (
-                 <g key={i}>
-                    <line x1={px} y1={y-5} x2={px} y2={y+25} stroke="#374151" strokeWidth="2" />
-                    <text x={px} y={y-10} textAnchor={textAnchor} className="text-xs font-bold fill-gray-800">{p.label}</text>
-                 </g>
-             )
-         })}
       </svg>
-      {label && (
-        <div className="mt-2 text-sm text-gray-500 font-bold">{label}</div>
-      )}
     </div>
   );
 };

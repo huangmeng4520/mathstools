@@ -1,48 +1,4 @@
-
-
 import { ReactNode } from 'react';
-
-export interface Question {
-  id: string;
-  category: string;
-  title: string;
-  content: ReactNode;
-  options: Option[];
-  correctId: string;
-  explanation: ReactNode;
-  hint?: string;
-  mistakeId?: string; // Links back to the original mistake for tracking
-  questionType?: 'judgment' | 'selection' | 'completion'; // New field for UI adaptation
-}
-
-export interface Option {
-  id: string;
-  text: string;
-}
-
-export enum QuizState {
-  START,
-  PLAYING,
-  COMPLETED
-}
-
-export interface ReviewResult {
-  mistakeId: string;
-  success: boolean;
-}
-
-// --- Visual Component Types ---
-export type VisualComponentType = 'clock' | 'block' | 'numberLine' | 'fraction' | 'geometry' | 'lineSegment' | 'emoji' | 'grid' | 'none';
-
-export interface VisualComponentData {
-  type: VisualComponentType;
-  props: Record<string, any>; // Flexible props to match backend JSON
-}
-
-// --- Backend Aligned Data Models ---
-
-export type MasteryLevel = 'new' | 'learning' | 'reviewing' | 'mastered';
-export type MistakeStatus = 'processing' | 'active' | 'archived' | 'deleted';
 
 export interface User {
   id: string;
@@ -55,49 +11,105 @@ export interface AuthResponse {
   user: User;
 }
 
+export interface VisualComponentData {
+  type: 'clock' | 'numberLine' | 'fraction' | 'geometry' | 'lineSegment' | 'emoji' | 'grid' | 'die';
+  props: Record<string, any>;
+}
+
 export interface MistakeRecord {
   id: string;
-  userId?: string; // For future multi-user support
-  originalMistakeId?: string; // Reference to the original mistake for variations
-  
-  // Image Info
-  imageData?: string; // Base64 string (Frontend Mock) or URL (Backend)
-  
-  // Content
+  userId: string;
   htmlContent: string;
-  visualComponents?: VisualComponentData[]; // Changed from single object to array
   answer: string;
   explanation: string;
   tags: string[];
-  
-  // Process Status
-  status: MistakeStatus;
-
-  // SRS (Spaced Repetition System) Stats
+  visualComponents?: VisualComponentData[];
+  // For legacy/compatibility
+  visualComponent?: VisualComponentData; 
+  imageData?: string;
+  status: 'active' | 'deleted' | 'processing';
   createdAt: number;
   updatedAt: number;
-  nextReviewAt: number; // Timestamp
+  nextReviewAt: number;
   reviewCount: number;
-  masteryLevel: MasteryLevel;
-}
-
-export interface MistakeData {
-  html: string;
-  answer: string;
-  explanation: string;
-  tags: string[];
-  visualComponents?: VisualComponentData[]; // Changed from single object to array
+  masteryLevel: 'new' | 'learning' | 'mastered';
   originalMistakeId?: string;
+  // For MongoDB compatibility
+  _id?: string;
 }
 
-export interface BulkMistakeInput {
-  originalImage: {
-    url: string;
-    fileId: string;
-  };
-  mistakes: MistakeData[];
+export type AddMistakePayload = 
+  | {
+      // Bulk / AI Analysis result
+      originalImage: { url: string; fileId: string };
+      mistakes: Array<{
+        html: string;
+        answer: string;
+        explanation: string;
+        tags: string[];
+        visualComponents?: VisualComponentData[];
+        originalMistakeId?: string;
+        visualComponent?: VisualComponentData; // legacy support
+      }>;
+    }
+  | {
+      // Single Variation / Manual
+      htmlContent: string;
+      answer: string;
+      explanation: string;
+      tags: string[];
+      visualComponents?: VisualComponentData[];
+      imageData?: string;
+      originalMistakeId?: string;
+      nextReviewAt?: number;
+      reviewCount?: number;
+      masteryLevel?: 'new' | 'learning' | 'mastered';
+      visualComponent?: VisualComponentData; // legacy
+    };
+
+export interface Option {
+  id: string;
+  text: string;
 }
 
-export type MistakeRecordInput = Omit<MistakeRecord, 'id' | 'createdAt' | 'updatedAt' | 'status'>;
+export interface Question {
+  id: string;
+  mistakeId?: string;
+  category: string;
+  title: string;
+  questionType?: 'judgment' | 'selection' | 'completion';
+  content: ReactNode;
+  options: Option[];
+  correctId: string;
+  explanation: ReactNode;
+  hint?: string;
+}
 
-export type AddMistakePayload = MistakeRecordInput | BulkMistakeInput;
+export interface ReviewResult {
+  mistakeId: string;
+  success: boolean;
+}
+
+export enum QuizState {
+  START = 'START',
+  PLAYING = 'PLAYING',
+  COMPLETED = 'COMPLETED'
+}
+
+export interface LineSegmentRow {
+  label?: string;
+  segments: Array<{
+    value: number;
+    label?: string;
+    color?: string;
+    type?: 'solid' | 'dotted' | 'dashed';
+  }>;
+}
+
+export interface LineSegmentBrace {
+  rowIndex: number;
+  start: number;
+  end: number;
+  label: string;
+  position?: 'top' | 'bottom';
+}

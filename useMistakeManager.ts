@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { MistakeRecord, AddMistakePayload } from './types';
 import { api } from './services/api';
@@ -75,7 +76,7 @@ export function useMistakeManager() {
     }
   };
 
-  const updateMistake = async (id: string, updates: Partial<MistakeRecord>) => {
+  const updateMistake = async (id: string, updates: any) => {
     try {
       // Optimistic update (optional, but safer to wait for response or just update local list if API returns full object)
       // Here we wait for API response
