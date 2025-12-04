@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { LineSegmentRow, LineSegmentBrace } from '../types';
 
@@ -8,7 +7,7 @@ export interface LineSegmentVisualizerProps {
   // Backward compatibility props (optional)
   total?: number;
   totalLabel?: string;
-  segments?: Array<{ value: number; label?: string; color?: string }>;
+  segments?: Array<{ value: number | null; label?: string; color?: string }>; // Allow null in types
   label?: string;
 }
 
@@ -19,24 +18,34 @@ export const LineSegmentVisualizer: React.FC<LineSegmentVisualizerProps> = (prop
   let dataBraces: LineSegmentBrace[] = props.braces || [];
 
   // Backward compatibility for old 'lineSegment' usage
-  if (dataRows.length === 0 && props.segments) {
+  if (dataRows.length === 0 && props.segments && props.segments.length > 0) {
+    
+    // FIX: Handle null values. 
+    // If total is provided, distribute evenly. Otherwise default to 1 unit.
+    const count = props.segments.length;
+    const autoValue = (props.total && count > 0) ? (props.total / count) : 1;
+
     dataRows = [{
       label: props.label,
       segments: props.segments.map(s => ({
-        value: s.value,
+        // If value is missing or null, use the auto-calculated value
+        value: (s.value !== null && s.value !== undefined) ? s.value : autoValue,
         label: s.label,
         color: s.color,
         type: 'solid'
       }))
     }];
-    if (props.totalLabel) {
-      // Add a total brace for the old style
-      const totalVal = props.segments.reduce((a, b) => a + b.value, 0);
+    
+    if (props.totalLabel || props.total) {
+      // Recalculate total based on the sanitized segments to ensure brace covers everything
+      // (In case props.total was missing but totalLabel exists)
+      const totalVal = dataRows[0].segments.reduce((a, b) => a + b.value, 0);
+      
       dataBraces.push({
         rowIndex: 0,
         start: 0,
         end: totalVal,
-        label: props.totalLabel,
+        label: props.totalLabel || `${props.total}`,
         position: 'bottom'
       });
     }
@@ -74,12 +83,15 @@ export const LineSegmentVisualizer: React.FC<LineSegmentVisualizerProps> = (prop
     // A curly brace path
     // Starts at x1,y. Curves to middle. Point at middle. Curves to x2,y.
     // Using Quadratic Bezier curves (Q)
+    // Clamp curve control points to avoid weird loops on very small segments
+    const curveX = Math.min(10, w/4);
+
     return `M ${x1} ${y} 
-            Q ${x1} ${y + h/2} ${x1 + Math.min(10, w/4)} ${y + h/2} 
-            L ${x1 + w/2 - Math.min(10, w/4)} ${y + h/2} 
+            Q ${x1} ${y + h/2} ${x1 + curveX} ${y + h/2} 
+            L ${x1 + w/2 - curveX} ${y + h/2} 
             Q ${x1 + w/2} ${y + h/2} ${x1 + w/2} ${y + h} 
-            Q ${x1 + w/2} ${y + h/2} ${x1 + w/2 + Math.min(10, w/4)} ${y + h/2} 
-            L ${x2 - Math.min(10, w/4)} ${y + h/2} 
+            Q ${x1 + w/2} ${y + h/2} ${x1 + w/2 + curveX} ${y + h/2} 
+            L ${x2 - curveX} ${y + h/2} 
             Q ${x2} ${y + h/2} ${x2} ${y}`;
   };
 
@@ -119,7 +131,7 @@ export const LineSegmentVisualizer: React.FC<LineSegmentVisualizerProps> = (prop
                     <rect 
                       x={currentX} 
                       y={rowY} 
-                      width={Math.max(segWidth, 1)} 
+                      width={Math.max(segWidth, 0)} // Ensure no negative width
                       height={ROW_HEIGHT} 
                       fill={isDotted ? 'white' : (seg.color || '#3b82f6')} 
                       stroke={seg.color || '#3b82f6'}
@@ -153,7 +165,8 @@ export const LineSegmentVisualizer: React.FC<LineSegmentVisualizerProps> = (prop
                 currentX += segWidth;
                 
                 // Add separator line if not the last segment and not dotted transition
-                const separator = segIndex < row.segments.length - 1 ? (
+                // Only draw separator if width is sufficient
+                const separator = (segIndex < row.segments.length - 1 && segWidth > 2) ? (
                    <line x1={currentX} y1={rowY} x2={currentX} y2={rowY + ROW_HEIGHT} stroke="white" strokeWidth="1" />
                 ) : null;
 
@@ -176,6 +189,9 @@ export const LineSegmentVisualizer: React.FC<LineSegmentVisualizerProps> = (prop
           const startX = START_X + brace.start * scale;
           const endX = START_X + brace.end * scale;
           
+          // Don't render if width is 0
+          if (endX - startX <= 0) return null;
+
           const braceY = brace.position === 'top' ? rowY - 5 : rowY + ROW_HEIGHT + 5;
           const textY = brace.position === 'top' ? braceY - BRACE_HEIGHT - 5 : braceY + BRACE_HEIGHT + 12;
 

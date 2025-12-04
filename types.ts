@@ -11,9 +11,30 @@ export interface AuthResponse {
   user: User;
 }
 
+export interface DrawingElement {
+  id: string;
+  type: 'path' | 'line' | 'rect' | 'circle' | 'text';
+  props: {
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    x1?: number;
+    y1?: number;
+    x2?: number;
+    y2?: number;
+    points?: Array<{x: number, y: number}>; // For freehand path
+    text?: string;
+    color?: string;
+    strokeWidth?: number;
+    fill?: string;
+    fontSize?: number;
+  };
+}
+
 export interface VisualComponentData {
-  type: 'clock' | 'numberLine' | 'fraction' | 'geometry' | 'lineSegment' | 'emoji' | 'grid' | 'die';
-  props: Record<string, any>;
+  type: 'clock' | 'numberLine' | 'fraction' | 'geometry' | 'lineSegment' | 'emoji' | 'grid' | 'die' | 'customDraw';
+  props: Record<string, any>; // For customDraw, props contains { width, height, elements: DrawingElement[] }
 }
 
 export interface MistakeRecord {

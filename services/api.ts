@@ -194,7 +194,7 @@ const transformBackendRecord = (mistake: any): MistakeRecord => ({
     // 2. Old object field content.visualComponent (wrap in array)
     // 3. Fallback flat fields
     visualComponents: mistake.content?.visualComponents || 
-                      (mistake.content?.visualComponent ? [mistake.content.visualComponent] : []) || 
+                      (mistake.content?.visualComponent ? [mistake.content.visualComponent] : undefined) || 
                       mistake.visualComponents || 
                       (mistake.visualComponent ? [mistake.visualComponent] : []),
     imageData: mistake.originalImage?.url || mistake.imageData,

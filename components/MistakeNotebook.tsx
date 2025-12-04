@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { 
@@ -32,7 +33,9 @@ import {
   Italic,
   Eraser,
   List,
-  Heading1
+  Heading1,
+  Pencil,
+  X
 } from 'lucide-react';
 import { MistakeRecord, VisualComponentData, Question, AddMistakePayload, Option } from '../types';
 import { api } from '../services/api';
@@ -44,6 +47,8 @@ import { EmojiCounter } from './EmojiCounter';
 import { GridVisualizer } from './GridVisualizer';
 import { LineSegmentVisualizer } from './LineSegmentVisualizer';
 import { DieVisualizer } from './DieVisualizer';
+import { CustomGraphVisualizer } from './CustomGraphVisualizer';
+import { CustomGraphEditor } from './CustomGraphEditor';
 
 // --- CONSTANTS ---
 const VISUAL_COMPONENT_INSTRUCTION = `
@@ -70,6 +75,8 @@ const VISUAL_COMPONENT_INSTRUCTION = `
    - 示例 (分类统计题): { "rows": 2, "cols": 5, "data": [{ "shape": "triangle", "content": "🐰", "label": "①" }, { "shape": "circle", "content": "🐱", "label": "②" }] }
 8. 骰子/正方体 (die): { "type": "die", "props": { "topValue": number(1-6), "leftValue": number(1-6), "rightValue": number(1-6), "size": number, "label": "string" } }
    - 注意：'leftValue' 对应正方体正面的数字，'rightValue' 对应右侧面，'topValue' 对应顶面。
+9. 自定义绘图 (customDraw): { "type": "customDraw", "props": { "width": number, "height": number, "elements": [ { "type": "path|line|rect|circle|text", "props": {...} } ] } }
+   - 仅在其他组件无法满足需求时使用。elements 包含SVG基本图形数据。
 `;
 
 // --- MARKDOWN & MATH RENDERER ---
@@ -312,6 +319,17 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
             />
         </div>
       );
+    case 'customDraw':
+      return (
+        <div className={commonClasses}>
+            <CustomGraphVisualizer
+              width={props.width}
+              height={props.height}
+              elements={props.elements}
+              label={props.label}
+            />
+        </div>
+      );
     default:
       return null;
   }
@@ -363,6 +381,52 @@ interface RichTextEditorProps {
   placeholder?: string;
 }
 
+// Helper function to format HTML
+const formatHtml = (html: string): string => {
+  // Simple HTML formatter that works in all environments
+  let result = '';
+  let indentLevel = 0;
+  const indentSize = 2;
+  let inComment = false;
+  
+  // Remove any existing newlines and extra spaces
+  let cleanedHtml = html.replace(/\s+/g, ' ').trim();
+  
+  // Split into tokens
+  const tokens = cleanedHtml.split(/(<[^>]+>)/g).filter(Boolean);
+  
+  for (const token of tokens) {
+    if (token.startsWith('<!--')) {
+      // Start of comment
+      inComment = true;
+      result += `${' '.repeat(indentLevel * indentSize)}${token}\n`;
+    } else if (token.endsWith('-->')) {
+      // End of comment
+      inComment = false;
+      result += `${' '.repeat(indentLevel * indentSize)}${token}\n`;
+    } else if (inComment) {
+      // Inside comment
+      result += `${' '.repeat(indentLevel * indentSize)}${token}\n`;
+    } else if (token.startsWith('</')) {
+      // Close tag
+      indentLevel--;
+      result += `${' '.repeat(indentLevel * indentSize)}${token}\n`;
+    } else if (token.startsWith('<') && token.endsWith('/>')) {
+      // Self-closing tag
+      result += `${' '.repeat(indentLevel * indentSize)}${token}\n`;
+    } else if (token.startsWith('<')) {
+      // Open tag
+      result += `${' '.repeat(indentLevel * indentSize)}${token}\n`;
+      indentLevel++;
+    } else if (token.trim()) {
+      // Text content
+      result += `${' '.repeat(indentLevel * indentSize)}${token.trim()}\n`;
+    }
+  }
+  
+  return result.trim();
+};
+
 const RichTextEditor: React.FC<RichTextEditorProps> = ({ 
   label, 
   value, 
@@ -372,6 +436,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
 }) => {
   const [editMode, setEditMode] = useState<'visual' | 'code'>('visual');
   const [internalHtml, setInternalHtml] = useState(value);
+  const [codeValue, setCodeValue] = useState(formatHtml(value)); // Format HTML for code mode
   const editorRef = useRef<HTMLDivElement>(null);
 
   // Sync internal HTML state when value prop changes externally (e.g. initial load)
@@ -379,16 +444,35 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
     // Determine if we need to upgrade markdown to HTML for visual editor
     const displayHtml = simpleMarkdownToHtmlForEditor(value);
     setInternalHtml(displayHtml);
+    // Update code value with formatted HTML
+    console.log('useEffect: value changed, original value:', value);
+    const formatted = formatHtml(value);
+    console.log('useEffect: formatted HTML:', formatted);
+    setCodeValue(formatted);
   }, [value]);
 
   const handleVisualChange = (newHtml: string) => {
     setInternalHtml(newHtml);
     onChange(newHtml);
+    // Update code value with formatted HTML
+    setCodeValue(formatHtml(newHtml));
   };
 
   const handleCodeChange = (newCode: string) => {
-    setInternalHtml(newCode); // When in code mode, internal represents the raw code
+    setCodeValue(newCode);
     onChange(newCode);
+  };
+
+  // Handle mode change
+  const handleModeChange = (newMode: 'visual' | 'code') => {
+    if (newMode === 'code') {
+      // Format HTML when switching to code mode
+      console.log('Switching to code mode, original value:', value);
+      const formatted = formatHtml(value);
+      console.log('Formatted HTML:', formatted);
+      setCodeValue(formatted);
+    }
+    setEditMode(newMode);
   };
 
   const execCmd = (cmd: string, arg?: string) => {
@@ -406,16 +490,18 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
           <label className="text-xs font-bold text-gray-500 uppercase tracking-wide ml-1">{label}</label>
           <div className="flex bg-gray-200/50 p-0.5 rounded-lg">
              <button 
-               onClick={() => setEditMode('visual')}
+               onClick={() => handleModeChange('visual')}
                className={`px-3 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${editMode === 'visual' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
              >
-                <Eye className="w-3 h-3" /> 可视化
+                <Eye className="w-3 h-3" />
+                可视化
              </button>
              <button 
-               onClick={() => setEditMode('code')}
+               onClick={() => handleModeChange('code')}
                className={`px-3 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1 ${editMode === 'code' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
              >
-                <Code className="w-3 h-3" /> 源码
+                <Code className="w-3 h-3" />
+                源码
              </button>
           </div>
        </div>
@@ -442,7 +528,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
           </div>
        ) : (
           <textarea
-            value={value} // Use raw value for code
+            value={codeValue} // Use formatted code value
             onChange={e => handleCodeChange(e.target.value)}
             className={`w-full px-3 py-2 font-mono text-xs ${height} outline-none bg-gray-50 text-gray-800 resize-none`}
             placeholder={placeholder || "<div>...</div> or Markdown"}
@@ -473,6 +559,7 @@ const MistakeEditor: React.FC<MistakeEditorProps> = ({ data, onSave, onCancel })
     tags: (data.tags || []).join(', '),
     visualComponentsJSON: JSON.stringify(data.visualComponents || [], null, 2)
   });
+  const [showGraphEditor, setShowGraphEditor] = useState(false);
 
   const handleSave = () => {
     try {
@@ -487,6 +574,20 @@ const MistakeEditor: React.FC<MistakeEditorProps> = ({ data, onSave, onCancel })
       });
     } catch (e) {
       alert("可视化组件 JSON 格式错误，请检查");
+    }
+  };
+
+  const handleAddDrawing = (drawingData: any) => {
+    try {
+      const visualComponents = JSON.parse(formData.visualComponentsJSON);
+      visualComponents.push(drawingData);
+      setFormData({
+        ...formData,
+        visualComponentsJSON: JSON.stringify(visualComponents, null, 2)
+      });
+      setShowGraphEditor(false);
+    } catch (e) {
+      alert("无法解析当前的 JSON 配置，请先修复格式错误后再添加图形。");
     }
   };
 
@@ -535,6 +636,18 @@ const MistakeEditor: React.FC<MistakeEditorProps> = ({ data, onSave, onCancel })
             <summary className="cursor-pointer text-xs font-bold text-gray-500 hover:text-purple-600 transition-colors flex items-center gap-1 select-none">
                 <Code className="w-3 h-3" /> 高级：可视化组件配置 (JSON)
             </summary>
+            
+            <div className="my-2">
+               <button 
+                 type="button"
+                 onClick={() => setShowGraphEditor(true)}
+                 className="flex items-center gap-1 px-3 py-1.5 bg-indigo-50 text-indigo-600 text-xs font-bold rounded-md border border-indigo-100 hover:bg-indigo-100 transition-colors"
+               >
+                 <Pencil className="w-3 h-3" /> 
+                 手绘图形编辑器
+               </button>
+            </div>
+
             <textarea
             value={formData.visualComponentsJSON}
             onChange={e => setFormData({...formData, visualComponentsJSON: e.target.value})}
@@ -542,6 +655,26 @@ const MistakeEditor: React.FC<MistakeEditorProps> = ({ data, onSave, onCancel })
             />
         </details>
       </div>
+
+      {showGraphEditor && (
+        <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white w-full max-w-4xl h-[80vh] rounded-xl shadow-2xl flex flex-col overflow-hidden">
+                <div className="p-3 border-b flex justify-between items-center bg-gray-50">
+                    <h3 className="font-bold text-gray-700 flex items-center gap-2">
+                        <Pencil className="w-4 h-4" /> 绘图编辑器
+                    </h3>
+                    <button onClick={() => setShowGraphEditor(false)} className="p-1 hover:bg-gray-200 rounded-full"><X className="w-5 h-5 text-gray-500"/></button>
+                </div>
+                <div className="flex-1 overflow-hidden">
+                    <CustomGraphEditor 
+                        onSave={handleAddDrawing}
+                        onClose={() => setShowGraphEditor(false)}
+                    />
+                </div>
+            </div>
+        </div>
+      )}
+
       <div className="flex justify-end gap-2 pt-2 border-t border-gray-100 mt-4">
         <button onClick={onCancel} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-bold transition-colors">取消</button>
         <button onClick={handleSave} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-bold transition-colors flex items-center gap-2 shadow-md shadow-purple-200">
@@ -974,7 +1107,7 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
 
         JSON结构要求：
         {
-          "html": "题目内容的 HTML（使用 Tailwind 类，字体大 text-2xl/3xl）。如果有可视化组件，请在 HTML 中预留位置或文字说明，组件将单独渲染。",
+          "html": "题目内容的 HTML（使用 Tailwind 类，字体大 text-sm/base）。如果有可视化组件，请在 HTML 中预留位置或文字说明，组件将单独渲染。",
           "visualComponents": [
              {
                 "type": "clock | numberLine | fraction | geometry | none | emoji | grid | die",
@@ -1326,12 +1459,12 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
         必须返回纯 JSON 格式（不要Markdown代码块），结构如下：
         [
           {
-            "html": "题目内容的 HTML（使用 Tailwind 类，字体大 text-2xl/3xl，重点数字加粗）。",
+            "html": "题目内容的 HTML（使用 Tailwind 类，字体大 text-sm/base，重点数字加粗）。",
             "visualComponents": [
               {
                 "type": "clock | numberLine | fraction | geometry | none | emoji | grid | die",
                 "props": { ... }
-              }
+             }
             ],
             "answer": "正确答案",
             "explanation": "详细解析（Markdown格式，支持$$LaTeX$$公式）",
@@ -1460,564 +1593,456 @@ export const MistakeNotebook: React.FC<MistakeNotebookProps> = ({
     }
   };
 
-  // --- RENDERING ---
+  // START OF RENDER LOGIC
+
+  // Print View
+  if (isPreparingPrint) {
+    return (
+      <div className="bg-white min-h-screen p-8 print:p-0">
+         <div className="mb-6 text-center print:hidden">
+            <h1 className="text-2xl font-bold">准备打印预览...</h1>
+            <p>正在生成打印版式，请稍候</p>
+         </div>
+         <div className="space-y-8 print:space-y-4">
+             {printMistakes.map((m, idx) => (
+               <div key={m.id} className="break-inside-avoid border-b border-gray-200 pb-4 mb-4">
+                  <div className="font-bold text-gray-500 mb-2">题目 {idx + 1}</div>
+                  <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{__html: m.htmlContent}} />
+                  {m.visualComponents && m.visualComponents.map((vc, vci) => (
+                    <div key={vci} className="my-2">{renderVisualComponent(vc)}</div>
+                  ))}
+               </div>
+             ))}
+         </div>
+      </div>
+    );
+  }
+
+  // Helper for pagination
+  const handlePrevPage = () => {
+    if (page > 1 && setPage) setPage(page - 1);
+  };
+  const handleNextPage = () => {
+    if (page < totalPages && setPage) setPage(page + 1);
+  };
 
   return (
-    <>
-      {/* Add print-specific global styles */}
-      <style>{`
-        @media print {
-          @page {
-            margin: 1.5cm;
-            size: A4;
-          }
-          body {
-            background: white;
-            color: black;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-          /* Ensure backgrounds (colors/images) are printed */
-          * {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-        }
-      `}</style>
-      
-      {/* MAIN CONTENT */}
-      <div className="max-w-4xl mx-auto p-4 pb-24 print:hidden">
-        {/* HEADER Actions */}
-        <div className="flex justify-between items-center mb-6">
-          <div>
-             <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-               <BookOpen className="w-6 h-6 text-purple-600" />
+    <div className="max-w-5xl mx-auto px-4 py-6 w-full">
+      {/* HEADER */}
+      <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+         <div>
+            <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight flex items-center gap-3">
+               <span className="bg-purple-100 text-purple-600 p-2 rounded-xl"><BrainCircuit className="w-8 h-8" /></span>
                智能错题本
-             </h2>
-             <p className="text-gray-500 text-sm">已收录 {totalCount} 道错题，{mistakes?.filter(m => Date.now() > m.nextReviewAt).length} 道待复习</p>
-          </div>
-          <div className="flex gap-2">
-             {view === 'list' && (
-               <>
-                 <button 
-                    onClick={handlePrint}
-                    disabled={isPreparingPrint}
-                    className={`px-4 py-2 bg-gray-100 text-gray-700 rounded-xl shadow-sm font-bold flex items-center gap-2 transition-colors ${isPreparingPrint ? 'cursor-not-allowed opacity-70' : 'hover:bg-gray-200'}`}
-                    title="打印全部错题"
-                 >
-                    {isPreparingPrint ? <Loader2 className="w-5 h-5 animate-spin"/> : <Printer className="w-5 h-5" />}
-                    <span className="hidden md:inline">{isPreparingPrint ? '准备中...' : '打印'}</span>
-                 </button>
-                 <button 
-                    onClick={handleStartReview}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-xl shadow-md font-bold flex items-center gap-2 hover:bg-indigo-700 transition-colors"
-                 >
-                    <Play className="w-5 h-5 fill-current" />
-                    开始复习
-                 </button>
-               </>
-             )}
-             <button 
-               onClick={() => setView(view === 'list' ? 'add' : 'list')}
-               className={`px-4 py-2 rounded-xl shadow-md font-bold flex items-center gap-2 transition-colors ${view === 'list' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
-             >
-               {view === 'list' ? <><Plus className="w-5 h-5" /> 录入错题</> : '返回列表'}
-             </button>
-          </div>
-        </div>
-
-        {/* ERROR BANNER */}
-        {storageError && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl mb-6 flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5" />
-            {storageError}
-          </div>
-        )}
-
-        {/* VIEW: ADD MISTAKE */}
-        {view === 'add' && (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
-            {!originalImageSrc ? (
-               <div className={`border-4 border-dashed border-gray-200 rounded-2xl p-12 text-center hover:bg-blue-50 hover:border-blue-300 transition-colors cursor-pointer relative bg-white ${isConverting ? 'opacity-50 pointer-events-none' : ''}`}>
-                 <input 
-                   ref={fileInputRef}
-                   type="file" 
-                   accept="image/*,.heic,.heif" 
-                   // capture="environment" // REMOVED: Allow gallery selection on mobile
-                   onChange={handleImageUpload} 
-                   className="absolute inset-0 opacity-0 cursor-pointer"
-                   disabled={isConverting}
-                 />
-                 
-                 {isConverting ? (
-                    <div className="flex flex-col items-center justify-center">
-                        <Loader2 className="w-10 h-10 animate-spin text-blue-500 mb-4" />
-                        <h3 className="text-xl font-bold text-gray-800 mb-2">正在处理图片...</h3>
-                        <p className="text-gray-500">HEIC 格式转换可能需要一点时间</p>
-                    </div>
-                 ) : (
-                    <>
-                        <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <Camera className="w-10 h-10" />
-                        </div>
-                        <h3 className="text-xl font-bold text-gray-800 mb-2">点击拍照或上传错题</h3>
-                        <p className="text-gray-500">支持竖式、应用题、图形题 (支持 JPG, PNG, HEIC)</p>
-                    </>
-                 )}
-               </div>
-            ) : !newImage ? (
-               // CROP UI
-               <div className="bg-gray-900 rounded-xl overflow-hidden shadow-2xl relative select-none touch-none flex flex-col">
-                 {/* HEADER BAR with INFO */}
-                 <div className="bg-black/80 text-white px-4 py-3 flex justify-between items-center backdrop-blur-md shrink-0 border-b border-gray-700 z-20">
-                   <div className="flex items-center gap-2">
-                      <Crop className="w-4 h-4 text-blue-400" />
-                      <span className="font-bold text-sm">请框选题目区域</span>
-                   </div>
-                   <div className="font-mono text-xs text-gray-400">
-                      {cropRect && cropRect.w > 0 ? `${Math.round(cropRect.w)} × ${Math.round(cropRect.h)} px` : '拖拽创建选区'}
-                   </div>
-                 </div>
-
-                 <div 
-                   className="relative max-h-[70vh] overflow-hidden flex items-center justify-center bg-black/50"
-                   onMouseDown={handleCropMouseDown}
-                   onMouseMove={handleCropMouseMove}
-                   onMouseUp={handleCropMouseUp}
-                   onMouseLeave={handleCropMouseUp}
-                   onTouchStart={handleCropMouseDown}
-                   onTouchMove={handleCropMouseMove}
-                   onTouchEnd={handleCropMouseUp}
-                 >
-                   <img 
-                     ref={imageRef}
-                     src={originalImageSrc} 
-                     className="max-w-full max-h-[70vh] object-contain pointer-events-none select-none" // prevent img drag
-                     alt="Original" 
-                     onLoad={() => {
-                       // Auto-init crop rect to center 80%? optional
-                     }}
-                   />
-                   {/* Dim Overlay */}
-                   <div className="absolute inset-0 bg-black/50 pointer-events-none" />
-                   
-                   {/* Crop Box */}
-                   {cropRect && cropRect.w > 0 && (
-                      <div 
-                        className="absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.6)] group"
-                        style={{
-                          left: cropRect.x,
-                          top: cropRect.y,
-                          width: cropRect.w,
-                          height: cropRect.h
-                        }}
-                      >
-                        {/* Grid Lines */}
-                        <div className="absolute inset-0 pointer-events-none opacity-40">
-                           <div className="absolute top-1/3 left-0 right-0 h-px bg-white/50"></div>
-                           <div className="absolute top-2/3 left-0 right-0 h-px bg-white/50"></div>
-                           <div className="absolute left-1/3 top-0 bottom-0 w-px bg-white/50"></div>
-                           <div className="absolute left-2/3 top-0 bottom-0 w-px bg-white/50"></div>
-                        </div>
-
-                        {/* Handles */}
-                        <div className="absolute -top-1.5 -left-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-nw-resize z-20 hover:scale-125 transition-transform" />
-                        <div className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-ne-resize z-20 hover:scale-125 transition-transform" />
-                        <div className="absolute -bottom-1.5 -left-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-sw-resize z-20 hover:scale-125 transition-transform" />
-                        <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-white border border-gray-400 rounded-full shadow-sm cursor-se-resize z-20 hover:scale-125 transition-transform" />
-                        
-                        {/* Move Hint */}
-                        <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity pointer-events-none">
-                           <Move className="w-8 h-8 text-white drop-shadow-md" />
-                        </div>
-                      </div>
-                   )}
-                 </div>
-                 
-                 <div className="p-4 bg-gray-800 flex justify-between items-center shrink-0 border-t border-gray-700">
-                    <button 
-                      onClick={handleReset}
-                      className="text-white hover:text-gray-300 font-bold px-4 py-2"
-                    >
-                      取消
-                    </button>
-                    <div className="flex gap-3">
-                      <button 
-                         onClick={() => analyzeImage(originalImageSrc)} // Skip crop
-                         className="px-4 py-2 text-gray-400 hover:text-white text-sm"
-                      >
-                         不剪裁直接识别
-                      </button>
-                      <button 
-                         onClick={confirmCrop}
-                         className="px-6 py-2 bg-blue-600 hover:bg-blue-50 text-white rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-blue-900/50"
-                      >
-                         <Check className="w-5 h-5" />
-                         确认剪裁
-                      </button>
-                    </div>
-                 </div>
-               </div>
-            ) : (
-               // ANALYSIS PREVIEW
-               <div className="space-y-6">
-                  <div className="flex gap-4 items-start">
-                     <div className="w-1/3 bg-gray-100 rounded-xl p-2 border border-gray-200">
-                        <img src={newImage} className="w-full rounded-lg shadow-sm mb-2" alt="Cropped" />
-                        <button 
-                          onClick={handleReCrop}
-                          className="w-full py-2 bg-white border border-gray-300 text-gray-600 rounded-lg text-sm font-bold hover:bg-gray-50 flex items-center justify-center gap-2"
-                        >
-                          <Crop className="w-4 h-4" />
-                          重新剪裁
-                        </button>
-                     </div>
-                     
-                     <div className="flex-1 space-y-4">
-                        {isProcessing ? (
-                           <div className="h-64 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col items-center justify-center gap-4">
-                              <RefreshCw className="w-10 h-10 animate-spin text-blue-500" />
-                              <div className="text-center">
-                                 <p className="font-bold text-gray-800 text-lg">AI 老师正在分析...</p>
-                                 <p className="text-gray-500 text-sm">识别手写字迹 • 解析算理 • 提取图形</p>
-                              </div>
-                           </div>
-                        ) : analyzedData.length > 0 ? (
-                           <div className="space-y-4">
-                              {analyzedData.map((data, idx) => (
-                                 <div key={idx} className="bg-white rounded-xl shadow-lg border border-purple-100 overflow-hidden">
-                                    <div className="bg-purple-50 px-4 py-2 border-b border-purple-100 flex justify-between items-center">
-                                       <span className="font-bold text-purple-700 text-sm">识别结果 {analyzedData.length > 1 ? `#${idx+1}` : ''}</span>
-                                       {editingAnalysisIndex !== idx && (
-                                          <button 
-                                            onClick={() => setEditingAnalysisIndex(idx)}
-                                            className="text-purple-600 hover:text-purple-800 hover:bg-purple-100 p-1.5 rounded transition-colors"
-                                            title="手动编辑"
-                                          >
-                                            <Edit className="w-4 h-4" />
-                                          </button>
-                                       )}
-                                    </div>
-                                    
-                                    {editingAnalysisIndex === idx ? (
-                                        <MistakeEditor 
-                                          data={data}
-                                          onSave={(updatedData) => handleSaveAnalysisUpdate(idx, updatedData)}
-                                          onCancel={() => setEditingAnalysisIndex(null)}
-                                        />
-                                    ) : (
-                                        <div className="p-6">
-                                           <div 
-                                             className="prose max-w-none text-gray-900 mb-4 text-xl"
-                                             dangerouslySetInnerHTML={{__html: data.html}} 
-                                           />
-                                           {data.visualComponents && data.visualComponents.map((vc, i) => (
-                                              <div key={i}>{renderVisualComponent(vc)}</div>
-                                           ))}
-                                           <div className="bg-green-50 p-4 rounded-lg border border-green-100 text-sm text-gray-700">
-                                              <div className="font-bold text-green-800 mb-1 flex items-center gap-2">
-                                                <span>Answer:</span>
-                                                <MarkdownRenderer content={data.answer} />
-                                              </div>
-                                              <div><MarkdownRenderer content={data.explanation} /></div>
-                                           </div>
-                                        </div>
-                                    )}
-                                 </div>
-                              ))}
-                              
-                              {/* REGENERATE SECTION */}
-                              <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                 <h4 className="font-bold text-gray-700 mb-2 flex items-center gap-2">
-                                   <AlertTriangle className="w-4 h-4 text-orange-500" />
-                                   识别不准确？
-                                 </h4>
-                                 <div className="flex gap-2">
-                                    <input 
-                                      type="text" 
-                                      value={retryPrompt}
-                                      onChange={(e) => setRetryPrompt(e.target.value)}
-                                      placeholder="输入提示，例如：'这是除法不是加法' 或 '数字是 15'"
-                                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                    />
-                                    <button 
-                                      onClick={() => analyzeImage(newImage, retryPrompt)}
-                                      className="px-4 py-2 bg-white border border-gray-300 text-gray-700 font-bold rounded-lg hover:bg-gray-50 text-sm whitespace-nowrap"
-                                    >
-                                      重新生成
-                                    </button>
-                                 </div>
-                              </div>
-
-                              <div className="flex gap-3 pt-2">
-                                 <button 
-                                   onClick={handleReset}
-                                   className="flex-1 py-3 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors"
-                                 >
-                                   放弃
-                                 </button>
-                                 <button 
-                                   onClick={saveNewMistake}
-                                   className="flex-[2] py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 transition-colors flex items-center justify-center gap-2"
-                                 >
-                                   <CheckCircle2 className="w-5 h-5" />
-                                   确认并保存错题
-                                 </button>
-                              </div>
-                           </div>
-                        ) : (
-                           <div className="bg-red-50 text-red-600 p-4 rounded-xl border border-red-100 text-center">
-                              识别失败，请尝试重新剪裁或上传更清晰的图片。
-                           </div>
-                        )}
-                     </div>
-                  </div>
-               </div>
-            )}
-          </div>
-        )}
-
-        {/* VIEW: LIST */}
-        {view === 'list' && (
-          <div className="space-y-6">
-             {isLoading && mistakes?.length === 0 ? (
-                <div className="text-center py-20 text-gray-400">
-                  <RefreshCw className="w-10 h-10 animate-spin mx-auto mb-4" />
-                  加载中...
-                </div>
-             ) : mistakes?.length === 0 ? (
-                <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-300">
-                   <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <BookOpen className="w-10 h-10 text-gray-400" />
-                   </div>
-                   <h3 className="text-xl font-bold text-gray-800 mb-2">错题本是空的</h3>
-                   <p className="text-gray-500 mb-6">快去录入第一道错题吧，AI 帮你分析！</p>
-                   <button 
-                     onClick={() => setView('add')}
-                     className="px-6 py-3 bg-blue-600 text-white font-bold rounded-full shadow-lg hover:bg-blue-700 transition-transform hover:scale-105"
-                   >
-                     立即录入
-                   </button>
-                </div>
-             ) : (
-               <>
-                 <div className="grid gap-6">
-                   {mistakes?.map(mistake => (
-                     <MistakeCard 
-                       key={mistake.id} 
-                       mistake={mistake} 
-                       onDelete={deleteMistake}
-                       onReview={reviewMistake}
-                       onEdit={setEditingMistake}
-                       onGenerateVariation={handleGenerateVariation}
-                       isGenerating={generatingVariationId === mistake.id}
-                     />
-                   ))}
-                 </div>
-                 
-                 {/* PAGINATION */}
-                 {totalPages > 1 && setPage && (
-                   <div className="flex items-center justify-center gap-4 mt-8">
-                      <button 
-                         onClick={() => setPage(Math.max(1, page - 1))}
-                         disabled={page === 1 || isLoading}
-                         className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 border border-gray-200 bg-white"
-                      >
-                         <ChevronLeft className="w-5 h-5" />
-                      </button>
-                      
-                      <span className="text-sm font-bold text-gray-600">
-                         第 {page} 页 / 共 {totalPages} 页
-                      </span>
-
-                      <button 
-                         onClick={() => setPage(Math.min(totalPages, page + 1))}
-                         disabled={page === totalPages || isLoading}
-                         className="p-2 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-gray-600 border border-gray-200 bg-white"
-                      >
-                         <ChevronRight className="w-5 h-5" />
-                      </button>
-                   </div>
-                 )}
-               </>
-             )}
-          </div>
-        )}
-
-        {/* MODAL: EDIT MISTAKE */}
-        {editingMistake && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-             <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
-                <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex justify-between items-center text-white shrink-0">
-                   <h3 className="font-bold text-lg flex items-center gap-2">
-                      <Edit className="w-5 h-5" />
-                      编辑错题
-                   </h3>
-                   <button onClick={() => setEditingMistake(null)} className="hover:bg-white/20 p-1 rounded-full transition-colors">
-                      <XCircle className="w-6 h-6" />
-                   </button>
-                </div>
-                
-                <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
-                    <MistakeEditor 
-                      data={{
-                        html: editingMistake.htmlContent,
-                        answer: editingMistake.answer,
-                        explanation: editingMistake.explanation,
-                        tags: editingMistake.tags,
-                        visualComponents: editingMistake.visualComponents
-                      }}
-                      onSave={handleUpdateMistake}
-                      onCancel={() => setEditingMistake(null)}
-                    />
-                </div>
-             </div>
-          </div>
-        )}
-
-        {/* MODAL: VARIATION PREVIEW */}
-        {showVariationPreview && currentVariation && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-             <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
-                <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 flex justify-between items-center text-white shrink-0">
-                   <h3 className="font-bold text-lg flex items-center gap-2">
-                      <Wand2 className="w-5 h-5" />
-                      AI 生成变式练习
-                   </h3>
-                   <div className="flex items-center gap-2">
-                     {!isEditingVariation && (
-                       <button onClick={() => setIsEditingVariation(true)} className="hover:bg-white/20 p-1.5 rounded-full transition-colors" title="编辑题目">
-                         <Edit className="w-5 h-5" />
-                       </button>
-                     )}
-                     <button onClick={() => setShowVariationPreview(false)} className="hover:bg-white/20 p-1 rounded-full transition-colors">
-                        <XCircle className="w-6 h-6" />
-                     </button>
-                   </div>
-                </div>
-                
-                <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
-                   {isEditingVariation ? (
-                      <MistakeEditor 
-                        data={currentVariation}
-                        onSave={handleSaveVariationUpdate}
-                        onCancel={() => setIsEditingVariation(false)}
-                      />
-                   ) : (
-                     <>
-                       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
-                          <div className="flex gap-2 mb-4">
-                             {currentVariation.tags.map(t => (
-                                <span key={t} className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded border border-purple-100">{t}</span>
-                             ))}
-                          </div>
-                          <div 
-                             className="prose max-w-none text-gray-900 text-xl"
-                             dangerouslySetInnerHTML={{__html: currentVariation.html}} 
-                          />
-                          {currentVariation.visualComponents && currentVariation.visualComponents.map((vc, i) => (
-                             <div key={i}>{renderVisualComponent(vc)}</div>
-                          ))}
-                       </div>
-
-                       <div className="bg-green-50 p-5 rounded-xl border border-green-100">
-                          <div className="font-bold text-green-800 mb-2 text-sm uppercase tracking-wide">参考答案</div>
-                          <div className="text-gray-900 font-medium mb-3">
-                            <MarkdownRenderer content={currentVariation.answer} />
-                          </div>
-                          <div className="text-sm text-gray-600">
-                            <MarkdownRenderer content={currentVariation.explanation} />
-                          </div>
-                       </div>
-                     </>
-                   )}
-                </div>
-
-                {!isEditingVariation && (
-                  <div className="p-4 bg-white border-t border-gray-200 flex justify-end gap-3 shrink-0">
-                     <button 
-                       onClick={() => setShowVariationPreview(false)}
-                       className="px-5 py-2.5 text-gray-600 font-bold hover:bg-gray-100 rounded-lg transition-colors"
-                     >
-                       取消
-                     </button>
-                     <button 
-                       onClick={handleSaveVariation}
-                       className="px-6 py-2.5 bg-purple-600 text-white font-bold rounded-lg hover:bg-purple-700 shadow-lg shadow-purple-200 transition-colors flex items-center gap-2"
-                     >
-                       <Save className="w-4 h-4" />
-                       保存到错题本
-                     </button>
-                  </div>
-                )}
-             </div>
-          </div>
-        )}
-      </div>
-
-      {/* PRINT VIEW (HIDDEN ON SCREEN) */}
-      <div className="hidden print:block bg-white text-black p-8">
-         <div className="text-center mb-6 border-b-2 border-black pb-4">
-            <h1 className="text-2xl font-bold mb-1">智能错题本 - 复习卷</h1>
-            <p className="text-xs text-gray-500">生成时间：{new Date().toLocaleDateString()} &nbsp;•&nbsp; 共 {printMistakes.length > 0 ? printMistakes.length : mistakes.length} 题</p>
+            </h1>
+            <p className="text-gray-500 mt-1 ml-1 text-sm">
+               已收录 <span className="font-bold text-gray-900">{totalCount}</span> 道错题 
+               {isLoading && <span className="ml-2 inline-block w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin align-middle"></span>}
+            </p>
          </div>
          
-         {printMistakes.length === 0 && mistakes.length === 0 ? (
-            <div className="text-center text-gray-500">正在准备打印数据...</div>
-         ) : (
-            <div className="space-y-6">
-              {(printMistakes.length > 0 ? printMistakes : mistakes).map((m, i) => (
-                 <div key={m.id} className="break-inside-avoid border-b border-gray-200 pb-4 mb-4">
-                    {/* Header: ID and Tags */}
-                    <div className="flex items-center gap-2 mb-2">
-                        <span className="font-bold text-lg bg-black text-white w-6 h-6 flex items-center justify-center rounded-full text-xs">{i + 1}</span>
-                        <div className="flex gap-1">
-                           {m.tags.map(t => (
-                              <span key={t} className="text-[10px] font-bold border border-gray-400 px-1.5 py-0.5 rounded text-gray-600">{t}</span>
-                           ))}
+         <div className="flex gap-3 w-full md:w-auto">
+            {view === 'list' && !editingMistake && !showVariationPreview && (
+                <>
+                  <button 
+                    onClick={handleStartReview} 
+                    className="flex-1 md:flex-none px-4 py-2.5 bg-indigo-50 text-indigo-600 font-bold rounded-xl hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2 border border-indigo-100"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    智能复习
+                  </button>
+                  <button 
+                    onClick={handlePrint} 
+                    className="flex-1 md:flex-none px-4 py-2.5 bg-gray-50 text-gray-600 font-bold rounded-xl hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 border border-gray-100"
+                    title="打印全部错题"
+                  >
+                    <Printer className="w-4 h-4" />
+                    打印
+                  </button>
+                  <button 
+                    onClick={() => setView('add')}
+                    className="flex-1 md:flex-none px-6 py-2.5 bg-gray-900 text-white font-bold rounded-xl hover:bg-black transition-all shadow-lg hover:shadow-xl active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    <Plus className="w-5 h-5" />
+                    录入错题
+                  </button>
+                </>
+            )}
+            {(view === 'add' || editingMistake || showVariationPreview) && (
+                <button 
+                  onClick={() => {
+                    setView('list');
+                    setEditingMistake(null);
+                    setShowVariationPreview(false);
+                    handleReset();
+                  }}
+                  className="px-4 py-2.5 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  返回列表
+                </button>
+            )}
+         </div>
+      </div>
+
+      {storageError && (
+        <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl border border-red-100 flex items-center gap-2 animate-in slide-in-from-top-2">
+           <AlertTriangle className="w-5 h-5" />
+           {storageError}
+        </div>
+      )}
+
+      {/* --- VIEW: ADD MISTAKE --- */}
+      {view === 'add' && (
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+          {!newImage && !originalImageSrc ? (
+             // STEP 1: UPLOAD
+             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 md:p-12 text-center">
+                <div className="max-w-md mx-auto">
+                   <div className="w-20 h-20 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <Camera className="w-10 h-10" />
+                   </div>
+                   <h2 className="text-2xl font-bold text-gray-900 mb-2">拍照/上传错题</h2>
+                   <p className="text-gray-500 mb-8">支持自动识别题目内容、手写痕迹去除、AI 智能解析</p>
+                   
+                   <div className="grid grid-cols-1 gap-4">
+                      <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isConverting}
+                        className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-lg shadow-blue-200 shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                      >
+                         {isConverting ? <Loader2 className="w-6 h-6 animate-spin" /> : <Upload className="w-6 h-6" />}
+                         {isConverting ? '正在处理图片...' : '选择图片'}
+                      </button>
+                      <input 
+                        type="file" 
+                        accept="image/*,.heic,.heif" 
+                        className="hidden" 
+                        ref={fileInputRef}
+                        onChange={handleImageUpload}
+                      />
+                   </div>
+                   <p className="mt-4 text-xs text-gray-400">支持 JPG, PNG, HEIC 格式</p>
+                </div>
+             </div>
+          ) : !analyzedData.length ? (
+             // STEP 2: CROP & ANALYZE
+             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col md:flex-row h-[calc(100vh-200px)] md:h-[600px]">
+                <div className="flex-1 bg-gray-900 relative flex items-center justify-center overflow-hidden select-none group">
+                   <img 
+                     ref={imageRef}
+                     src={originalImageSrc || ''} 
+                     className="max-w-full max-h-full object-contain pointer-events-none"
+                     alt="To Crop"
+                   />
+                   {/* Interactive Overlay */}
+                   <div 
+                      className="absolute inset-0 z-10 cursor-crosshair touch-none"
+                      onMouseDown={handleCropMouseDown}
+                      onMouseMove={handleCropMouseMove}
+                      onMouseUp={handleCropMouseUp}
+                      onMouseLeave={handleCropMouseUp}
+                      onTouchStart={handleCropMouseDown}
+                      onTouchMove={handleCropMouseMove}
+                      onTouchEnd={handleCropMouseUp}
+                   />
+                   
+                   {/* Crop Rect Render */}
+                   {cropRect && (
+                      <div 
+                        className="absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.5)] pointer-events-none"
+                        style={{
+                            left: imageRef.current?.getBoundingClientRect().left! - (imageRef.current?.parentElement?.getBoundingClientRect().left || 0) + cropRect.x,
+                            top: imageRef.current?.getBoundingClientRect().top! - (imageRef.current?.parentElement?.getBoundingClientRect().top || 0) + cropRect.y,
+                            width: cropRect.w,
+                            height: cropRect.h
+                        }}
+                      >
+                          {/* Handles */}
+                          <div className="absolute -top-1.5 -left-1.5 w-3 h-3 bg-blue-500 border border-white"></div>
+                          <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-blue-500 border border-white"></div>
+                          <div className="absolute -bottom-1.5 -left-1.5 w-3 h-3 bg-blue-500 border border-white"></div>
+                          <div className="absolute -bottom-1.5 -right-1.5 w-3 h-3 bg-blue-500 border border-white"></div>
+                      </div>
+                   )}
+                   
+                   {isProcessing && (
+                      <div className="absolute inset-0 bg-black/60 z-20 flex flex-col items-center justify-center text-white backdrop-blur-sm">
+                         <Loader2 className="w-12 h-12 animate-spin mb-4 text-blue-400" />
+                         <p className="font-bold text-lg">AI 正在识别分析...</p>
+                         <p className="text-sm text-gray-300 mt-2">正在提取题目、生成解析、去除笔迹</p>
+                      </div>
+                   )}
+                </div>
+
+                <div className="w-full md:w-80 bg-white border-l border-gray-200 p-6 flex flex-col">
+                   <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                     <Crop className="w-5 h-5 text-gray-500" />
+                     裁剪题目
+                   </h3>
+                   <div className="text-sm text-gray-600 mb-6 space-y-2">
+                      <p>1. 在左侧拖动框选题目区域。</p>
+                      <p>2. 尽量只包含一道题目。</p>
+                      <p>3. 点击下方按钮开始识别。</p>
+                   </div>
+                   
+                   <div className="flex-1"></div>
+
+                   <div className="space-y-3">
+                      <button 
+                         onClick={confirmCrop}
+                         disabled={isProcessing}
+                         className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-200 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      >
+                         <BrainCircuit className="w-5 h-5" />
+                         {isProcessing ? '处理中...' : '确认并识别'}
+                      </button>
+                      <button 
+                         onClick={handleReset}
+                         disabled={isProcessing}
+                         className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold transition-colors"
+                      >
+                         取消 / 重选
+                      </button>
+                   </div>
+                </div>
+             </div>
+          ) : (
+             // STEP 3: REVIEW & EDIT RESULT
+             <div className="max-w-3xl mx-auto space-y-6">
+                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+                    <h3 className="font-bold text-xl text-gray-900 mb-6 flex items-center gap-2 border-b pb-4">
+                       <CheckCircle2 className="w-6 h-6 text-green-500" />
+                       识别结果确认
+                       <span className="text-sm font-normal text-gray-500 ml-auto">共 {analyzedData.length} 题</span>
+                    </h3>
+                    
+                    {analyzedData.map((item, idx) => (
+                        <div key={idx} className="mb-8 last:mb-0 border border-gray-100 rounded-xl p-4 bg-gray-50">
+                           <div className="flex justify-between items-center mb-4">
+                              <span className="font-bold text-gray-500 text-sm">题目 {idx + 1}</span>
+                              <div className="flex gap-2">
+                                <button 
+                                  onClick={() => setEditingAnalysisIndex(idx)}
+                                  className="text-blue-600 text-sm font-bold hover:underline"
+                                >
+                                  编辑修改
+                                </button>
+                                {analyzedData.length > 1 && (
+                                    <button 
+                                      onClick={() => {
+                                          const newData = [...analyzedData];
+                                          newData.splice(idx, 1);
+                                          setAnalyzedData(newData);
+                                      }}
+                                      className="text-red-500 text-sm font-bold hover:underline"
+                                    >
+                                      删除
+                                    </button>
+                                )}
+                              </div>
+                           </div>
+
+                           {editingAnalysisIndex === idx ? (
+                               <MistakeEditor 
+                                 data={item} 
+                                 onSave={(data) => handleSaveAnalysisUpdate(idx, data)}
+                                 onCancel={() => setEditingAnalysisIndex(null)}
+                               />
+                           ) : (
+                               <div className="bg-white p-4 rounded-lg border border-gray-200">
+                                  <div className="prose prose-sm max-w-none text-gray-800 mb-4" dangerouslySetInnerHTML={{__html: item.html}} />
+                                  {item.visualComponents && item.visualComponents.map((vc, i) => (
+                                     <div key={i}>{renderVisualComponent(vc)}</div>
+                                  ))}
+                                  <div className="flex gap-2 mb-2">
+                                     <span className="text-xs font-bold text-gray-400 uppercase">Answer:</span>
+                                     <span className="text-sm font-bold text-green-600">{item.answer}</span>
+                                  </div>
+                                  <div className="flex gap-2">
+                                      {item.tags.map(t => <span key={t} className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-600">{t}</span>)}
+                                  </div>
+                               </div>
+                           )}
                         </div>
+                    ))}
+                    
+                    {/* Retry / Add More Actions */}
+                    <div className="mt-8 flex gap-4 pt-4 border-t border-gray-100">
+                       <button 
+                         onClick={handleReCrop}
+                         className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200"
+                       >
+                         丢弃结果重新裁剪
+                       </button>
+                       <button 
+                         onClick={saveNewMistake}
+                         className="flex-1 py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 shadow-lg shadow-purple-200"
+                       >
+                         全部保存入库
+                       </button>
                     </div>
 
-                    <div className="flex gap-6 items-start">
-                        {/* Left Column: Original Image (if exists) */}
-                        {m.imageData && (
-                           <div className="w-1/3 shrink-0 flex flex-col gap-1">
-                              <div className="border border-gray-200 rounded p-1">
-                                <img src={m.imageData} className="w-full object-contain max-h-[5cm]" alt="原题" />
-                              </div>
-                              <span className="text-[10px] text-center text-gray-400">原题截图</span>
-                           </div>
-                        )}
-                        
-                        {/* Right Column: Content */}
-                        <div className="flex-1 min-w-0">
-                           <div 
-                              className="prose prose-sm max-w-none text-black leading-snug" 
-                              dangerouslySetInnerHTML={{__html: m.htmlContent}} 
-                           />
-                           
-                           {/* Visual Components - Scaled down slightly for print */}
-                           {m.visualComponents && m.visualComponents.length > 0 && (
-                              <div className="my-2 p-2 border border-dashed border-gray-300 rounded bg-gray-50/50 print:bg-transparent">
-                                 {m.visualComponents.map((vc, idx) => (
-                                    <div key={idx} className="scale-90 origin-left">
-                                       {renderVisualComponent(vc)}
-                                    </div>
-                                 ))}
-                              </div>
-                           )}
-                           
-                           {/* Workspace for student */}
-                           <div className="mt-4 pt-4 border-t-2 border-dotted border-gray-300 h-32">
-                              <p className="text-[10px] text-gray-400 mb-1">解题区：</p>
-                           </div>
-                        </div>
+                    {/* Retry Prompt */}
+                    <div className="mt-6">
+                       <details className="text-sm text-gray-500">
+                          <summary className="cursor-pointer hover:text-gray-800">识别不准？使用提示词重试</summary>
+                          <div className="mt-2 flex gap-2">
+                             <input 
+                               type="text" 
+                               value={retryPrompt} 
+                               onChange={(e) => setRetryPrompt(e.target.value)}
+                               placeholder="例如：只识别第一题，或者忽略手写红笔..."
+                               className="flex-1 px-3 py-2 border rounded-lg text-sm"
+                             />
+                             <button 
+                               onClick={() => newImage && analyzeImage(newImage, retryPrompt)}
+                               disabled={isProcessing}
+                               className="px-4 py-2 bg-blue-100 text-blue-700 font-bold rounded-lg text-sm"
+                             >
+                               重试
+                             </button>
+                          </div>
+                       </details>
                     </div>
                  </div>
-              ))}
-            </div>
-         )}
-      </div>
-    </>
+             </div>
+          )}
+        </div>
+      )}
+
+      {/* --- VIEW: EDIT EXISTING --- */}
+      {view === 'list' && editingMistake && (
+          <div className="max-w-3xl mx-auto">
+             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
+                <h2 className="text-xl font-bold mb-6">编辑错题</h2>
+                <MistakeEditor 
+                  data={{
+                      html: editingMistake.htmlContent,
+                      answer: editingMistake.answer,
+                      explanation: editingMistake.explanation,
+                      tags: editingMistake.tags,
+                      visualComponents: editingMistake.visualComponents
+                  }} 
+                  onSave={handleUpdateMistake}
+                  onCancel={() => setEditingMistake(null)}
+                />
+             </div>
+          </div>
+      )}
+
+      {/* --- VIEW: VARIATION PREVIEW --- */}
+      {view === 'list' && !editingMistake && showVariationPreview && currentVariation && (
+          <div className="max-w-3xl mx-auto animate-in slide-in-from-right-8 duration-300">
+              <div className="bg-gradient-to-r from-purple-600 to-indigo-600 p-1 rounded-2xl shadow-xl">
+                  <div className="bg-white rounded-xl p-6 md:p-8">
+                     <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                           <Wand2 className="w-6 h-6 text-purple-600" />
+                           AI 生成变式题
+                        </h2>
+                        <button onClick={() => setShowVariationPreview(false)} className="p-2 hover:bg-gray-100 rounded-full"><X className="w-5 h-5"/></button>
+                     </div>
+
+                     {isEditingVariation ? (
+                        <MistakeEditor 
+                           data={currentVariation}
+                           onSave={handleSaveVariationUpdate}
+                           onCancel={() => setIsEditingVariation(false)}
+                        />
+                     ) : (
+                        <div className="space-y-6">
+                           <div className="bg-purple-50 p-6 rounded-xl border border-purple-100">
+                              <div className="prose prose-lg max-w-none text-gray-900" dangerouslySetInnerHTML={{__html: currentVariation.html}} />
+                              {currentVariation.visualComponents && currentVariation.visualComponents.map((vc, i) => (
+                                 <div key={i}>{renderVisualComponent(vc)}</div>
+                              ))}
+                           </div>
+
+                           <div className="flex gap-4 items-start bg-gray-50 p-4 rounded-xl">
+                              <span className="font-bold text-gray-500 text-sm uppercase mt-1">Answer:</span>
+                              <div className="font-bold text-gray-900">{currentVariation.answer}</div>
+                           </div>
+                           
+                           <div className="flex gap-2">
+                               {currentVariation.tags.map(t => <span key={t} className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded">{t}</span>)}
+                           </div>
+                        </div>
+                     )}
+
+                     <div className="mt-8 flex gap-3">
+                        <button 
+                          onClick={() => setIsEditingVariation(!isEditingVariation)} 
+                          className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200"
+                        >
+                           {isEditingVariation ? '取消编辑' : '手动微调'}
+                        </button>
+                        <button 
+                          onClick={handleSaveVariation}
+                          className="flex-1 py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 shadow-lg shadow-purple-200"
+                        >
+                           保存到错题本
+                        </button>
+                     </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* --- VIEW: LIST --- */}
+      {view === 'list' && !editingMistake && !showVariationPreview && (
+         <div className="space-y-8 animate-in fade-in duration-500">
+            {mistakes.length === 0 && !isLoading ? (
+               <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-300">
+                  <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400">
+                     <BookOpen className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-600 mb-2">错题本空空如也</h3>
+                  <p className="text-gray-400 mb-6">快去录入第一道错题吧，AI 帮你举一反三！</p>
+                  <button onClick={() => setView('add')} className="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700">立即录入</button>
+               </div>
+            ) : (
+               <>
+                  <div className="columns-1 md:columns-1 gap-6 space-y-6">
+                     {mistakes.map(mistake => (
+                        <MistakeCard 
+                           key={mistake.id} 
+                           mistake={mistake} 
+                           onDelete={deleteMistake}
+                           onReview={reviewMistake}
+                           onEdit={setEditingMistake}
+                           onGenerateVariation={handleGenerateVariation}
+                           isGenerating={generatingVariationId === mistake.id}
+                        />
+                     ))}
+                  </div>
+
+                  {/* Pagination Controls */}
+                  {totalPages > 1 && (
+                     <div className="flex justify-center items-center gap-4 py-8">
+                        <button 
+                          onClick={handlePrevPage}
+                          disabled={page === 1}
+                          className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                        >
+                           <ChevronLeft className="w-6 h-6 text-gray-700" />
+                        </button>
+                        <span className="font-bold text-gray-600">
+                           {page} / {totalPages}
+                        </span>
+                        <button 
+                          onClick={handleNextPage}
+                          disabled={page === totalPages}
+                          className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                        >
+                           <ChevronRight className="w-6 h-6 text-gray-700" />
+                        </button>
+                     </div>
+                  )}
+               </>
+            )}
+         </div>
+      )}
+    </div>
   );
 };
