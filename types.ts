@@ -33,8 +33,9 @@ export interface DrawingElement {
 }
 
 export interface VisualComponentData {
-  type: 'clock' | 'numberLine' | 'fraction' | 'geometry' | 'lineSegment' | 'emoji' | 'grid' | 'die' | 'customDraw';
-  props: Record<string, any>; // For customDraw, props contains { width, height, elements: DrawingElement[] }
+  type: 'clock' | 'numberLine' | 'fraction' | 'geometry' | 'lineSegment' | 'emoji' | 'grid' | 'die' | 'customDraw' | 'chain';
+  props: Record<string, any>; 
+  // For chain: { count: number, diameter: number, thickness: number, label?: string }
 }
 
 export interface MistakeRecord {

@@ -49,6 +49,7 @@ import { LineSegmentVisualizer } from './LineSegmentVisualizer';
 import { DieVisualizer } from './DieVisualizer';
 import { CustomGraphVisualizer } from './CustomGraphVisualizer';
 import { CustomGraphEditor } from './CustomGraphEditor';
+import { ChainVisualizer } from './ChainVisualizer';
 
 // --- CONSTANTS ---
 const VISUAL_COMPONENT_INSTRUCTION = `
@@ -75,7 +76,8 @@ const VISUAL_COMPONENT_INSTRUCTION = `
    - 示例 (分类统计题): { "rows": 2, "cols": 5, "data": [{ "shape": "triangle", "content": "🐰", "label": "①" }, { "shape": "circle", "content": "🐱", "label": "②" }] }
 8. 骰子/正方体 (die): { "type": "die", "props": { "topValue": number(1-6), "leftValue": number(1-6), "rightValue": number(1-6), "size": number, "label": "string" } }
    - 注意：'leftValue' 对应正方体正面的数字，'rightValue' 对应右侧面，'topValue' 对应顶面。
-9. 自定义绘图 (customDraw): { "type": "customDraw", "props": { "width": number, "height": number, "elements": [ { "type": "path|line|rect|circle|text", "props": {...} } ] } }
+9. 铁环链 (chain): { "type": "chain", "props": { "count": number, "diameter": number, "thickness": number, "label": "string" } }
+10. 自定义绘图 (customDraw): { "type": "customDraw", "props": { "width": number, "height": number, "elements": [ { "type": "path|line|rect|circle|text", "props": {...} } ] } }
    - 仅在其他组件无法满足需求时使用。elements 包含SVG基本图形数据。
 `;
 
@@ -319,6 +321,17 @@ const renderVisualComponent = (visual: VisualComponentData | undefined) => {
             />
         </div>
       );
+    case 'chain':
+      return (
+        <div className={commonClasses}>
+            <ChainVisualizer 
+              count={props.count}
+              diameter={props.diameter}
+              thickness={props.thickness}
+              label={props.label}
+            />
+        </div>
+      );
     case 'customDraw':
       return (
         <div className={commonClasses}>
@@ -445,9 +458,9 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
     const displayHtml = simpleMarkdownToHtmlForEditor(value);
     setInternalHtml(displayHtml);
     // Update code value with formatted HTML
-    console.log('useEffect: value changed, original value:', value);
+    // console.log('useEffect: value changed, original value:', value);
     const formatted = formatHtml(value);
-    console.log('useEffect: formatted HTML:', formatted);
+    // console.log('useEffect: formatted HTML:', formatted);
     setCodeValue(formatted);
   }, [value]);
 
@@ -467,9 +480,9 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
   const handleModeChange = (newMode: 'visual' | 'code') => {
     if (newMode === 'code') {
       // Format HTML when switching to code mode
-      console.log('Switching to code mode, original value:', value);
+      // console.log('Switching to code mode, original value:', value);
       const formatted = formatHtml(value);
-      console.log('Formatted HTML:', formatted);
+      // console.log('Formatted HTML:', formatted);
       setCodeValue(formatted);
     }
     setEditMode(newMode);
